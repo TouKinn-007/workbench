@@ -524,35 +524,51 @@ function dateBarHtml(){
 }
 
 // ============ Tab1: 重启计划 ============
-// plan_history: { date: [ {done, note} ] }  索引0-5是普通任务
-function getPlanToday(){
+// plan_history: { date: [ {state, note} ] }  索引0-5是普通任务
+// 注意：所有写入都必须保存「完整日期对象」(h)，不能只保存当日切片(arr)，否则会破坏结构
+function getPlanStore(){
   let D = VIEW;
-  let h = ls('wb_plan_history') || {};
-  if(!Array.isArray(h[D])){
-    if(D !== TODAY) return null;            // 往期无记录 → 返回 null
-    h[D] = PLAN_TASKS.slice(0,6).map(()=>({state:0,note:''}));
-    ls('wb_plan_history', h);
+  let raw = ls('wb_plan_history');
+  let h;
+  if(Array.isArray(raw)){            // 兼容旧版本损坏数据：整条值被存成了数组
+    h = { [D]: raw }; ls('wb_plan_history', h);
+  } else {
+    h = (raw && typeof raw === 'object') ? raw : {};
   }
+  if(!Array.isArray(h[D])){
+    if(D !== TODAY) return {h, arr:null};   // 往期无记录 → 返回 null
+    h[D] = PLAN_TASKS.slice(0,6).map(()=>({state:0,note:''}));
+  }
+  let arr = h[D];
   // 兼容旧数据 done -> state
-  h[D].forEach(t=>{
+  arr.forEach(t=>{
     if(!t || typeof t !== 'object') return;
     if(t.state===undefined) t.state = t.done===true ? 2 : 0;
     delete t.done;
   });
   if(D === TODAY) ls('wb_plan_history', h);
-  return h[D];
+  return {h, arr};
 }
-function getHealthToday(){
+function getPlanToday(){ return getPlanStore().arr; }
+function getHealthStore(){
   let D = VIEW;
-  let h = ls('wb_health_history') || {};
-  if(!h[D] || typeof h[D] !== 'object' || Array.isArray(h[D])){
-    if(D !== TODAY) return null;
-    h[D] = {noSnack:false, intermittent:false, weight:null};
-    ls('wb_health_history', h);
+  let raw = ls('wb_health_history');
+  let h;
+  if(raw && typeof raw === 'object' && !Array.isArray(raw) && raw[D]===undefined && ('noSnack' in raw || 'weight' in raw)){
+    // 兼容旧版本损坏数据：整条值被存成了当日对象
+    h = { [D]: raw }; ls('wb_health_history', h);
+  } else {
+    h = (raw && typeof raw === 'object') ? raw : {};
   }
+  if(!h[D] || typeof h[D] !== 'object' || Array.isArray(h[D])){
+    if(D !== TODAY) return {h, obj:null};
+    h[D] = {noSnack:false, intermittent:false, weight:null};
+  }
+  let obj = h[D];
   if(D === TODAY) ls('wb_health_history', h);
-  return h[D];
+  return {h, obj};
 }
+function getHealthToday(){ return getHealthStore().obj; }
 function getWeightHistory(){
   return ls('wb_weight_history') || {};
 }
@@ -687,8 +703,9 @@ function renderPlan(){
 
 function togglePlan(i){
   if(!canEdit()){ toast('往期记录为只读'); return; }
-  let h = getPlanToday();
-  let t = h[i];
+  let {h, arr} = getPlanStore();
+  if(!arr) return;
+  let t = arr[i];
   t.state = (t.state===undefined?0:t.state)+1;
   if(t.state>2) t.state=0;
   ls('wb_plan_history', h);
@@ -696,34 +713,37 @@ function togglePlan(i){
 }
 function savePlanNote(i,val){
   if(!canEdit()) return;
-  let h = getPlanToday();
-  h[i].note = val;
+  let {h, arr} = getPlanStore();
+  if(!arr) return;
+  arr[i].note = val;
   ls('wb_plan_history', h);
 }
 
 function toggleHealth(field){
   if(!canEdit()){ toast('往期记录为只读'); return; }
-  let ht = getHealthToday();
-  ht[field] = !ht[field];
-  ls('wb_health_history', ht);
+  let {h, obj} = getHealthStore();
+  if(!obj) return;
+  obj[field] = !obj[field];
+  ls('wb_health_history', h);
   renderPlan();
 }
 function checkHealthAll(){
   if(!canEdit()){ toast('往期记录为只读'); return; }
-  let ht = getHealthToday();
-  let h = ht;
-  let allDone = h.noSnack && h.intermittent && h.weight;
-  h.noSnack = !allDone;
-  h.intermittent = !allDone;
-  ls('wb_health_history', ht);
+  let {h, obj} = getHealthStore();
+  if(!obj) return;
+  let allDone = obj.noSnack && obj.intermittent && obj.weight;
+  obj.noSnack = !allDone;
+  obj.intermittent = !allDone;
+  ls('wb_health_history', h);
   renderPlan();
 }
 function saveWeight(val){
   if(!canEdit()) return;
-  let ht = getHealthToday();
+  let {h, obj} = getHealthStore();
+  if(!obj) return;
   let w = parseFloat(val);
-  ht.weight = isNaN(w)?null:w;
-  ls('wb_health_history', ht);
+  obj.weight = isNaN(w)?null:w;
+  ls('wb_health_history', h);
   let wh = getWeightHistory();
   wh[VIEW] = isNaN(w)?null:w;
   ls('wb_weight_history', wh);
