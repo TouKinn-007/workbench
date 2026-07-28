@@ -196,6 +196,44 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
 .en-explain{font-size:12.5px;line-height:1.65;background:#f0f4ff;border-radius:8px;padding:9px;margin-top:4px;color:var(--text)}
 .en-score{font-size:13px;font-weight:600;color:var(--accent);margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
 .en-empty{text-align:center;color:var(--gray);font-size:13px;padding:30px}
+
+/* 同步状态隐藏（30秒自动同步不再展示） */
+.sync-status{display:none}
+/* 禁用原生下拉刷新，改为自定义下拉=同步 */
+html,body{overscroll-behavior-y:contain}
+.content-area{position:relative;overscroll-behavior-y:contain}
+
+/* 每个 Tab 的日期选择器 */
+.date-bar{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.date-input{font-family:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);outline:none}
+.date-today{padding:6px 10px;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit}
+.date-tag{font-size:11px;color:#e8603c;background:#fdecea;padding:3px 8px;border-radius:10px}
+.rev-readonly{background:#fafafa;color:#999}
+
+/* 下拉同步提示 + Toast */
+.pull-indicator{position:fixed;top:0;left:50%;transform:translateX(-50%);text-align:center;color:var(--gray);font-size:12px;padding:8px 14px;background:rgba(255,255,255,.92);border-radius:0 0 12px 12px;box-shadow:0 2px 8px rgba(0,0,0,.08);opacity:0;transition:opacity .2s;z-index:900;pointer-events:none}
+.pull-indicator.show{opacity:1}
+.toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%);background:rgba(0,0,0,.82);color:#fff;font-size:13px;padding:10px 16px;border-radius:20px;opacity:0;transition:opacity .25s;z-index:999;pointer-events:none;white-space:nowrap}
+.toast.show{opacity:1}
+
+/* 英语学习：已学/已跟读徽标、挖空、跟读 */
+.en-badge{display:inline-block;font-size:11px;font-weight:600;padding:3px 9px;border-radius:10px;cursor:pointer;user-select:none}
+.en-badge.off{background:#f0f0f0;color:#999}
+.en-badge.on{background:#e3f7e8;color:#1d7a3a}
+.en-subhead{display:flex;justify-content:space-between;align-items:center;margin:4px 0 10px}
+.en-cloze-input,.en-zh-input{width:100%;padding:9px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;margin-bottom:8px;box-sizing:border-box;outline:none;color:var(--text)}
+.en-cloze-input:focus,.en-zh-input:focus{border-color:var(--accent)}
+.en-sentence .blank{color:var(--accent);font-weight:700}
+.en-shadow-row{display:flex;align-items:center;gap:10px;margin-top:10px}
+.en-play{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;font-family:inherit}
+.en-play:disabled{background:#ccc;cursor:not-allowed}
+.en-submit{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;cursor:pointer;font-family:inherit;margin-bottom:8px}
+.en-cloze-input.ok,.en-zh-input.ok{border-color:#37a95a;background:#f1f8f1}
+.en-cloze-input.wrong,.en-zh-input.wrong{border-color:#e0584e;background:#fdecec}
+.en-key{display:inline-block;background:#f0f4ff;color:var(--accent);font-size:11px;padding:2px 7px;border-radius:8px;margin:0 3px;font-weight:600}
+.en-badge{cursor:default}
+button.en-badge{cursor:pointer}
+.en-tag{display:inline-block;background:#f0f0f0;color:#999;font-size:10px;font-weight:600;padding:2px 8px;border-radius:9px;margin-left:6px;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -465,54 +503,94 @@ let activeTab = 'work';
 let currentChartRange = 'week';
 let chartOffset = 0;
 
+// ============ 每 Tab 独立日期视图 ============
+let tabDate = {};                       // { tabId: 'YYYY-MM-DD' }
+function tabD(){ return tabDate[activeTab] || TODAY; }
+let VIEW = TODAY;                       // 当前 Tab 正在查看的日期
+function canEdit(){ return VIEW === TODAY; }
+function setTabDate(v){ tabDate[activeTab] = v; renderActiveTab(); }
+function toast(msg){
+  let t = document.getElementById('toast');
+  if(!t) return;
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(()=>t.classList.remove('show'), 1800);
+}
+function dateBarHtml(){
+  let D = tabD(); let past = D !== TODAY;
+  return `<div class="date-bar">
+    <input type="date" class="date-input" value="${D}" max="${TODAY}" onchange="setTabDate(this.value)">
+    ${past?`<button class="date-today" onclick="setTabDate(TODAY)">回到今天</button><span class="date-tag">往期只读</span>`:''}
+  </div>`;
+}
+
 // ============ Tab1: 重启计划 ============
 // plan_history: { date: [ {done, note} ] }  索引0-5是普通任务
 function getPlanToday(){
+  let D = VIEW;
   let h = ls('wb_plan_history') || {};
-  if(!Array.isArray(h[TODAY])) h[TODAY] = PLAN_TASKS.slice(0,6).map(()=>({state:0,note:''}));
+  if(!Array.isArray(h[D])){
+    if(D !== TODAY) return null;            // 往期无记录 → 返回 null
+    h[D] = PLAN_TASKS.slice(0,6).map(()=>({state:0,note:''}));
+    ls('wb_plan_history', h);
+  }
   // 兼容旧数据 done -> state
-  h[TODAY].forEach(t=>{
+  h[D].forEach(t=>{
     if(!t || typeof t !== 'object') return;
     if(t.state===undefined) t.state = t.done===true ? 2 : 0;
     delete t.done;
   });
-  ls('wb_plan_history', h);
-  return h;
+  if(D === TODAY) ls('wb_plan_history', h);
+  return h[D];
 }
 function getHealthToday(){
+  let D = VIEW;
   let h = ls('wb_health_history') || {};
-  if(!h[TODAY] || typeof h[TODAY] !== 'object' || Array.isArray(h[TODAY])) h[TODAY] = {noSnack:false, intermittent:false, weight:null};
-  ls('wb_health_history', h);
-  return h;
+  if(!h[D] || typeof h[D] !== 'object' || Array.isArray(h[D])){
+    if(D !== TODAY) return null;
+    h[D] = {noSnack:false, intermittent:false, weight:null};
+    ls('wb_health_history', h);
+  }
+  if(D === TODAY) ls('wb_health_history', h);
+  return h[D];
 }
 function getWeightHistory(){
   return ls('wb_weight_history') || {};
 }
 
-// 计算今日完成率（0-5 + 健康2项 = 8项可完成，体重曲线不算）
+// 计算完成率（0-5 + 健康2项 = 8项可完成，体重曲线不算），按当前 VIEW 日期
 function calcDailyRate(){
-  let h = getPlanToday();
+  let today = getPlanToday();
   let ht = getHealthToday();
-  let today = h[TODAY]||[];
+  if(!today) return 0;
   let done = today.filter(t=>t&&t.state===2).length;
-  if(ht[TODAY] && ht[TODAY].noSnack) done++;
-  if(ht[TODAY] && ht[TODAY].intermittent) done++;
+  if(ht && ht.noSnack) done++;
+  if(ht && ht.intermittent) done++;
   return Math.round(done/8*100);
 }
 
 // 渲染重启计划
 function renderPlan(){
-  let h = getPlanToday();
+  VIEW = tabD();
+  let today = getPlanToday();
   let ht = getHealthToday();
-  let today = h[TODAY];
+  let hadRecord = !!today;
+  if(!today) today = [];
+  if(!ht) ht = {noSnack:false, intermittent:false, weight:null};
   let wh = getWeightHistory();
   let pct = calcDailyRate();
+  let past = !canEdit();
+  let ro = past ? 'readonly' : '';
   let rateColor = pct>=80?'#4caf50':pct>=50?'#ff9800':'#9e9e9e';
   let rateBg = pct>=80?'#e8f5e9':pct>=50?'#fff3e0':'#f5f5f5';
-  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+  let rateLabel = past ? (hadRecord?`当日 ${pct}%`:'当日 —') : `今日 ${pct}%`;
+  let html = dateBarHtml();
+  html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
     <div style="font-size:17px;font-weight:700">🔥 重启计划</div>
-    <div style="font-size:13px;font-weight:600;padding:4px 10px;border-radius:12px;background:${rateBg};color:${rateColor}">今日 ${pct}%</div>
+    <div style="font-size:13px;font-weight:600;padding:4px 10px;border-radius:12px;background:${rateBg};color:${rateColor}">${rateLabel}</div>
   </div>`;
+  if(!hadRecord){
+    html += `<div class="empty-state"><div class="icon">🔥</div><p>${VIEW} 无任务记录</p></div>`;
+  }
 
   // 0-5: 普通任务
   for(let i=0;i<6;i++){
@@ -532,12 +610,12 @@ function renderPlan(){
   }
 
   // 6: 健康饮食
-  let health = ht[TODAY];
+  let health = ht;
   let prevWeight = null;
-  // 找前一天的体重
-  let allDates = Object.keys(wh).sort();
+  // 找前一天的体重（相对当前查看日期 VIEW）
+  let allDates = Object.keys(wh).filter(d=>wh[d]!=null).sort();
   for(let d=allDates.length-1;d>=0;d--){
-    if(allDates[d]<TODAY && wh[allDates[d]]!==null && wh[allDates[d]]!==undefined){prevWeight=wh[allDates[d]];break;}
+    if(allDates[d]<VIEW && wh[allDates[d]]!==null && wh[allDates[d]]!==undefined){prevWeight=wh[allDates[d]];break;}
   }
   let curWeight = health.weight;
   let arrow = '';
@@ -570,7 +648,7 @@ function renderPlan(){
       <div class="health-row" style="padding-top:2px">
         <div class="weight-input">
           <span>早体重</span>
-          <input type="text" inputmode="decimal" placeholder="kg" value="${curWeight||''}" oninput="saveWeight(this.value)" onblur="saveWeightCommit(this)">
+          <input type="text" inputmode="decimal" placeholder="kg" value="${curWeight||''}" ${ro} oninput="saveWeight(this.value)" onblur="saveWeightCommit(this)">
           <span id="weightArrow">${arrow}</span>
         </div>
       </div>
@@ -594,10 +672,10 @@ function renderPlan(){
   </div>`;
 
   // 备注区
-  let notes = lsRaw(`wb_notes_plan_${TODAY}`);
+  let notes = lsRaw(`wb_notes_plan_${VIEW}`);
   html += `<div class="notes-section">
-    <label>📝 今日备注 / 心得</label>
-    <textarea class="notes-box" oninput="lsRaw('wb_notes_plan_${TODAY}',this.value)" placeholder="记录今天完成情况...">${notes}</textarea>
+    <label>📝 ${past?'当日':'今日'}备注 / 心得</label>
+    <textarea class="notes-box" ${ro} oninput="lsRaw('wb_notes_plan_${VIEW}',this.value)" placeholder="记录完成情况...">${notes}</textarea>
   </div>`;
 
   document.getElementById('contentArea').innerHTML = html;
@@ -608,28 +686,32 @@ function renderPlan(){
 }
 
 function togglePlan(i){
+  if(!canEdit()){ toast('往期记录为只读'); return; }
   let h = getPlanToday();
-  let t = h[TODAY][i];
+  let t = h[i];
   t.state = (t.state===undefined?0:t.state)+1;
   if(t.state>2) t.state=0;
   ls('wb_plan_history', h);
   renderPlan();
 }
 function savePlanNote(i,val){
+  if(!canEdit()) return;
   let h = getPlanToday();
-  h[TODAY][i].note = val;
+  h[i].note = val;
   ls('wb_plan_history', h);
 }
 
 function toggleHealth(field){
+  if(!canEdit()){ toast('往期记录为只读'); return; }
   let ht = getHealthToday();
-  ht[TODAY][field] = !ht[TODAY][field];
+  ht[field] = !ht[field];
   ls('wb_health_history', ht);
   renderPlan();
 }
 function checkHealthAll(){
+  if(!canEdit()){ toast('往期记录为只读'); return; }
   let ht = getHealthToday();
-  let h = ht[TODAY];
+  let h = ht;
   let allDone = h.noSnack && h.intermittent && h.weight;
   h.noSnack = !allDone;
   h.intermittent = !allDone;
@@ -637,18 +719,20 @@ function checkHealthAll(){
   renderPlan();
 }
 function saveWeight(val){
+  if(!canEdit()) return;
   let ht = getHealthToday();
   let w = parseFloat(val);
-  ht[TODAY].weight = isNaN(w)?null:w;
+  ht.weight = isNaN(w)?null:w;
   ls('wb_health_history', ht);
   let wh = getWeightHistory();
-  wh[TODAY] = isNaN(w)?null:w;
+  wh[VIEW] = isNaN(w)?null:w;
   ls('wb_weight_history', wh);
   // 只更新箭头和图表，不重渲染（避免输入框失焦）
   updateWeightArrow(isNaN(w)?null:w);
   renderWeightChart();
 }
 function saveWeightCommit(input){
+  if(!canEdit()) return;
   // 输入完成时清洗并回写
   let v = input.value.trim();
   if(v==='') return;
@@ -867,19 +951,23 @@ function migrateTaskState(t){
   if(t.children) t.children.forEach(migrateTaskState);
 }
 function getWorkTasks(){
-  let tasks = ls(`wb_work_${TODAY}`)||[];
+  let tasks = ls(`wb_work_${VIEW}`)||[];
   tasks.forEach(migrateTaskState);
   return tasks;
 }
 function saveWorkTasks(tasks){
-  ls(`wb_work_${TODAY}`,tasks);
+  ls(`wb_work_${VIEW}`,tasks);
 }
 
 function renderWork(){
+  VIEW = tabD();
+  let past = !canEdit();
+  let ro = past ? 'readonly' : '';
   let tasks = getWorkTasks();
-  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+  let html = dateBarHtml();
+  html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
     <div style="font-size:17px;font-weight:700">工作任务</div>
-    <button class="add-btn" onclick="showAddWorkModal()" title="添加任务">+</button>
+    ${past?'':`<button class="add-btn" onclick="showAddWorkModal()" title="添加任务">+</button>`}
   </div>`;
   if(tasks.length===0){
     html += `<div class="empty-state"><div class="icon">💼</div><p>暂无任务，点击 + 添加</p></div>`;
@@ -924,9 +1012,9 @@ function renderWork(){
     </div>`;
     });
   }
-  let notes = lsRaw(`wb_notes_work_${TODAY}`);
+  let notes = lsRaw(`wb_notes_work_${VIEW}`);
   html += `<div class="notes-section"><label>📝 工作备注</label>
-    <textarea class="notes-box" oninput="lsRaw('wb_notes_work_${TODAY}',this.value)" placeholder="工作相关备注...">${notes}</textarea></div>`;
+    <textarea class="notes-box" ${ro} oninput="lsRaw('wb_notes_work_${VIEW}',this.value)" placeholder="工作相关备注...">${notes}</textarea></div>`;
   document.getElementById('contentArea').innerHTML = html;
   // 初始化滑动
   tasks.forEach((_,i)=>initSwipe(document.getElementById('workItem'+i),()=>deleteWork(i)));
@@ -934,10 +1022,12 @@ function renderWork(){
 
 function cycleState(state){ return (state===undefined?0:state)+1 > 2 ? 0 : (state===undefined?0:state)+1; }
 function toggleWork(i){
+  if(!canEdit()){ toast('往期记录为只读'); return; }
   let tasks=getWorkTasks(); if(!tasks[i]) return;
   tasks[i].state=cycleState(tasks[i].state);saveWorkTasks(tasks);renderWork();
 }
 function toggleWorkSub(i,j){
+  if(!canEdit()){ toast('往期记录为只读'); return; }
   let tasks=getWorkTasks();
   if(!tasks[i] || !tasks[i].children || !tasks[i].children[j]) return;
   let c = tasks[i].children[j];
@@ -948,32 +1038,40 @@ function toggleWorkSub(i,j){
   saveWorkTasks(tasks);renderWork();
 }
 function saveWorkNote(i,val){
+  if(!canEdit()) return;
   let tasks=getWorkTasks();tasks[i].note=val;saveWorkTasks(tasks);
 }
 function deleteWork(i){
+  if(!canEdit()){ toast('往期记录为只读'); return; }
   let tasks=getWorkTasks();tasks.splice(i,1);saveWorkTasks(tasks);renderWork();
 }
 function deleteWorkSub(i,j){
+  if(!canEdit()){ toast('往期记录为只读'); return; }
   let tasks=getWorkTasks();tasks[i].children.splice(j,1);saveWorkTasks(tasks);renderWork();
 }
 function editWorkText(i,el){
+  if(!canEdit()){ toast('往期记录为只读'); return; }
   let tasks=getWorkTasks();
   let cur=tasks[i].text;
   el.innerHTML=`<input type="text" value="${cur}" style="width:100%;border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:14px;font-family:inherit;outline:none" onblur="finishEditWork(${i},this)" onkeydown="if(event.key==='Enter')this.blur()">`;
   el.querySelector('input').focus();
 }
 function finishEditWork(i,input){
+  if(!canEdit()) return;
   let tasks=getWorkTasks();tasks[i].text=input.value.trim()||tasks[i].text;saveWorkTasks(tasks);renderWork();
 }
 function editWorkSubText(i,j,el){
+  if(!canEdit()){ toast('往期记录为只读'); return; }
   let tasks=getWorkTasks();let cur=tasks[i].children[j].text;
   el.innerHTML=`<input type="text" value="${cur}" style="width:100%;border:1px solid var(--border);border-radius:4px;padding:3px;font-size:13px;font-family:inherit;outline:none" onblur="finishEditWorkSub(${i},${j},this)" onkeydown="if(event.key==='Enter')this.blur()">`;
   el.querySelector('input').focus();
 }
 function finishEditWorkSub(i,j,input){
+  if(!canEdit()) return;
   let tasks=getWorkTasks();tasks[i].children[j].text=input.value.trim()||tasks[i].children[j].text;saveWorkTasks(tasks);renderWork();
 }
 function showAddWorkModal(){
+  if(!canEdit()){ toast('往期记录为只读'); return; }
   document.getElementById('modalTitle').textContent='添加工作任务';
   document.getElementById('taskInput').value='';
   document.getElementById('modal').classList.add('show');
@@ -1004,6 +1102,18 @@ function addWorkSub(i){
 // ============ Tab3: 英语学习 ============
 // 语料来源：Taylor Swift 纽约大学 2022 毕业演讲
 let enSubview = 'explain';
+// --- 每日确定性抽取 & 状态工具（按 VIEW 日期隔离） ---
+function seedNum(str){ let h=2166136261; for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; }
+function dailyShuffle(arr, seed){ let a=arr.slice(); let s=seed>>>0; for(let i=a.length-1;i>0;i--){ s=(Math.imul(s,1664525)+1013904223)>>>0; let j=s%(i+1); let t=a[i]; a[i]=a[j]; a[j]=t; } return a; }
+function dailyEnLessons(D){ return dailyShuffle(EN_LESSONS, seedNum('enL'+D)).slice(0,10); }
+function enTestType(D, idx){ const t=['mc','blank','zhe']; return t[seedNum('enT'+D+idx)%3]; }
+function dailyEnTests(D){ return dailyEnLessons(D).map((les,idx)=>({les, idx, type:enTestType(D,idx)})); }
+function enKeys(en){ const stop=new Set(['a','an','the','is','am','are','was','were','be','been','being','to','of','in','on','for','and','or','but','we','you','i','it','this','that','these','those','my','your','our','as','at','by','from','with','so','not','no','do','does','did','have','has','had','will','would','can','could','should','may','might','they','he','she','them','us','me','him','her','its','their','per','se','long','all','out','up','if','than','then','there','here','into','about','over','more','most','such','own','now','one','ones','who','whom','which','what','when','where','why','how','today','done','get']); return en.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(w=>w&&!stop.has(w)&&w.length>2).slice(0,4); }
+function norm(s){ return (s||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim(); }
+function enLearned(){ return ls('wb_en_learned_'+VIEW) || {}; }
+function enTestState(){ return ls('wb_en_test_'+VIEW) || {}; }
+function enShadowState(){ return ls('wb_en_shadow_'+VIEW) || {}; }
+function enGuard(){ if(!canEdit()){ toast('往期记录为只读'); return false; } return true; }
 const EN_LESSONS = [
   {
     id:'en1',
@@ -1017,7 +1127,8 @@ const EN_LESSONS = [
     test:{q:`“Not a single one of us...” 中 not a single one 的语法作用是？`,
       options:['表部分否定，还有一些人','表完全否定、强调无一例外','表一般疑问','表委婉推测'],
       answer:1,
-      explain:`Not a single one 为否定前置 + 单数名词，表示“一个都没有”，语气比 none 更强。`}
+      explain:`Not a single one 为否定前置 + 单数名词，表示"一个都没有"，语气比 none 更强。`},
+    blank:{word:'Not a single one', hint:'N _ _  a  s _ _ _ _  o _ _'}
   },
   {
     id:'en2',
@@ -1032,7 +1143,8 @@ const EN_LESSONS = [
     test:{q:`“As for me” 在句中的作用是？`,
       options:['表示原因','转换话题、把焦点引到自己身上','表示转折','表示举例'],
       answer:1,
-      explain:`as for 用来切换话题焦点，相当于“至于 / 说到”。`}
+      explain:`as for 用来切换话题焦点，相当于"至于 / 说到"。`},
+    blank:{word:'As for me', hint:'A _  f _ _  m _'}
   },
   {
     id:'en3',
@@ -1047,7 +1159,8 @@ const EN_LESSONS = [
     test:{q:`“those who have loved us” 里 those who 的意思是？`,
       options:['那些事','那些爱过我们的人','那些地方','那些书'],
       answer:1,
-      explain:`those (who + 从句) 是固定用法，指代“做……的那些人”。`}
+      explain:`those (who + 从句) 是固定用法，指代"做……的那些人"。`},
+    blank:{word:'patchwork quilt', hint:'p _ _ _ _ _ _ _  q _ _ _ _'}
   },
   {
     id:'en4',
@@ -1061,7 +1174,8 @@ const EN_LESSONS = [
     test:{q:`“per se” 在句中的意思是？`,
       options:['例如','本身、本质上','除此之外','然而'],
       answer:1,
-      explain:`per se 是拉丁语外来词，作状语表示“本身 / 就其本身而言”。`}
+      explain:`per se 是拉丁语外来词，作状语表示"本身 / 就其本身而言"。`},
+    blank:{word:'per se', hint:'p _ _  s _'}
   },
   {
     id:'en5',
@@ -1075,7 +1189,8 @@ const EN_LESSONS = [
     test:{q:`“on your own” 的意思是？`,
       options:['靠自己、独自','和别人一起','在户外','马上'],
       answer:0,
-      explain:`on one's own = by oneself，意为“独自 / 靠自己”。`}
+      explain:`on one's own = by oneself，意为"独自 / 靠自己"。`},
+    blank:{word:'on your own', hint:'o _  y _ _ _  o _ _'}
   },
   {
     id:'en6',
@@ -1090,42 +1205,215 @@ const EN_LESSONS = [
     test:{q:`“As long as” 引导的是哪种从句？`,
       options:['时间状语从句','条件状语从句（只要）','定语从句','宾语从句'],
       answer:1,
-      explain:`as long as 意为“只要”，引导条件状语从句，相当于 provided that。`}
+      explain:`as long as 意为"只要"，引导条件状语从句，相当于 provided that。`},
+    blank:{word:'As long as', hint:'A _  l _ _ _  a _'}
+  },
+  {
+    id:'en7',
+    en:`I'm never going to tell you to stay in your lane.`,
+    zh:`我永远不会叫你"安分守己、别越界"。`,
+    words:[
+      {w:'stay in your lane', m:'安分守己 / 待在你该待的位置（口语指不要多管闲事或超出自己的领域）', ex:`Just stay in your lane and do your job. 安分做好你自己的事就好。`},
+      {w:'tell you to', m:'告诉 / 叫你去做（tell sb to do）', ex:`She told me to leave. 她叫我去。`}
+    ],
+    grammar:`tell sb (not) to do sth 告诉某人（不要）做某事；stay in your lane 字面"待在你的车道里"，引申为"别越界、安分守己"，常用于劝人不要多管闲事。`,
+    test:{q:`"stay in your lane" 在这句话里的意思是？`,
+      options:['专心开车','安分守己、别越界','留在车道里','慢慢来'],
+      answer:1,
+      explain:`stay in your lane 是习语，引申为"安分守己、不要越界或插手别人的事"。`},
+    blank:{word:'stay in your lane', hint:'s _ _ _  i _  y _ _ _  l _ _ _'}
+  },
+  {
+    id:'en8',
+    en:`The times I was told no, I bettered those ideas.`,
+    zh:`那些我被拒绝、被说"不行"的时候，我把那些想法变得更好了。`,
+    words:[
+      {w:'was told no', m:'被拒绝 / 被告知不行（tell 的被动 + no）', ex:`He was told no again. 他再次被拒绝。`},
+      {w:'bettered', m:'better 的过去式，作动词"改进、使更好"', ex:`She bettered her score. 她改进了成绩。`},
+      {w:'those ideas', m:'那些想法（those + 名词复数）', ex:`Those ideas are worth trying. 那些想法值得一试。`}
+    ],
+    grammar:`the times (that) I was told no 是省略关系代词的定语从句，修饰 times；better 此处作及物动词"改进"；主干 I bettered those ideas 与定语从句形成"被否定反而促成了改进"的对比。`,
+    test:{q:`句中 "bettered" 的词性与意思是？`,
+      options:['名词"更好"','动词"改进、使更好"','形容词"好的"','副词"更好地"'],
+      answer:1,
+      explain:`better 可作动词，意为"改进、使更好"，这里用过去式 bettered。`},
+    blank:{word:'bettered', hint:'b _ _ _ _ _ _'}
+  },
+  {
+    id:'en9',
+    en:`I'm a proud member of the female fantasy-industrial complex.`,
+    zh:`我是"女性幻想工业复合体"中一个自豪的成员。`,
+    words:[
+      {w:'proud member', m:'自豪的成员（proud 修饰 member）', ex:`He is a proud member of the club. 他是俱乐部里自豪的一员。`},
+      {w:'fantasy-industrial complex', m:'幻想工业复合体（仿 military-industrial complex"军工复合体"的戏谑说法）', ex:`The term plays on "military-industrial complex". 这个词化用了"军工复合体"。`},
+      {w:'female', m:'/ˈfiːmeɪl/ adj. 女性的', ex:`female empowerment 女性赋权`}
+    ],
+    grammar:`...-industrial complex 仿自艾森豪威尔著名的 military-industrial complex（军工复合体），这里用 fantasy-industrial complex 自嘲自己身处"制造女性幻想"的产业；proud member of... 自豪的……成员。`,
+    test:{q:`"fantasy-industrial complex" 这个说法化用了哪个著名短语？`,
+      options:['military-industrial complex','industrial revolution','fantasy world','female power'],
+      answer:0,
+      explain:`该说法戏谑地化用了 military-industrial complex（军工复合体）。`},
+    blank:{word:'proud member', hint:'p _ _ _ _  m _ _ _ _ _'}
+  },
+  {
+    id:'en10',
+    en:`Learn to live alongside cringe.`,
+    zh:`学会与"尴尬 / 中二"共处。`,
+    words:[
+      {w:'learn to', m:'学会（learn to do）', ex:`Learn to relax. 学会放松。`},
+      {w:'live alongside', m:'与……共处 / 共存（alongside 介词"在……旁边"）', ex:`We must live alongside differences. 我们必须与差异共存。`},
+      {w:'cringe', m:'/krɪndʒ/ n.&v. 尴尬、令人脚趾抠地的中二行为', ex:`That moment was pure cringe. 那一刻简直尴尬到爆。`}
+    ],
+    grammar:`learn to do 学会做某事；alongside 作介词"与……一起"，live alongside cringe 把"尴尬"拟人化，劝人接纳不完美的自己。`,
+    test:{q:`"live alongside cringe" 中 alongside 的词性是？`,
+      options:['副词','介词"与……一起"','连词','形容词'],
+      answer:1,
+      explain:`alongside 在这里是介词，意为"与……一起 / 在……旁边"。`},
+    blank:{word:'cringe', hint:'c _ _ _ _ _'}
+  },
+  {
+    id:'en11',
+    en:`You will be defined more by your rejections than your acceptances.`,
+    zh:`你更多是由你的"被拒绝"而非"被接纳"来定义的。`,
+    words:[
+      {w:'be defined by', m:'被……定义', ex:`He is defined by his kindness. 他的善良定义了他的为人。`},
+      {w:'rejections', m:'/rɪˈdʒekʃənz/ n. 拒绝、被拒', ex:`Face rejections bravely. 勇敢面对拒绝。`},
+      {w:'acceptances', m:'/əkˈseptənsɪz/ n. 接纳、录取', ex:`Celebrate your acceptances. 为被接纳而庆祝。`}
+    ],
+    grammar:`be defined by 被动结构"被……定义"；more...than... 结构在此表示"与其……不如 / 比……更"，强调 rejections 比 acceptances 更能塑造一个人。`,
+    test:{q:`"more by your rejections than your acceptances" 体现的是？`,
+      options:['比较级 more...than，强调被拒更塑造人','并列无比较','因果关系','转折关系'],
+      answer:0,
+      explain:`more A than B 表示"更 A 而非 B"，这里强调"被拒绝"比"被接纳"更能定义你。`},
+    blank:{word:'rejections', hint:'r _ _ _ _ _ _ _ _'}
+  },
+  {
+    id:'en12',
+    en:`We are never going to be able to please everyone.`,
+    zh:`我们永远不可能让所有人满意。`,
+    words:[
+      {w:'be going to', m:'打算 / 将要（表未来计划或必然）', ex:`It's going to rain. 要下雨了。`},
+      {w:'be able to', m:'能够（= can，用于将来 / 完成时更自然）', ex:`Will you be able to come? 你能来吗？`},
+      {w:'please everyone', m:'让所有人满意（please 作动词"取悦"）', ex:`You can't please everyone. 你无法取悦所有人。`}
+    ],
+    grammar:`be going to 表将来的打算或必然；be able to 比 can 更适合将来时；please 作及物动词"使满意 / 取悦"，everyone 为宾语。`,
+    test:{q:`"be able to" 与 "can" 在此处的区别主要是？`,
+      options:['意思完全不同','be able to 更适合将来时','时态无关','be able to 是名词'],
+      answer:1,
+      explain:`can 一般用于现在/过去，将来时常用 be able to 更自然。`},
+    blank:{word:'please everyone', hint:'p _ _ _ _  e _ _ _ _ _ _'}
+  },
+  {
+    id:'en13',
+    en:`Treasure the people who want to see you succeed.`,
+    zh:`珍惜那些想看到你成功的人。`,
+    words:[
+      {w:'Treasure', m:'/ˈtreʒər/ v. 珍惜、珍视', ex:`Treasure every moment. 珍惜每一刻。`},
+      {w:'the people who...', m:'那些……的人（定语从句）', ex:`The people who help you are rare. 帮你的那些人很难得。`},
+      {w:'succeed', m:'/səkˈsiːd/ v. 成功', ex:`Work hard and you will succeed. 努力你就会成功。`}
+    ],
+    grammar:`treasure 作及物动词"珍视"，宾语是 the people；who want to see you succeed 是定语从句修饰 people；see sb do 用动词原形作宾补。`,
+    test:{q:`"Treasure" 在句中是？`,
+      options:['名词"宝藏"','动词"珍惜"','形容词','副词'],
+      answer:1,
+      explain:`此处 treasure 是及物动词，意为"珍惜、珍视"。`},
+    blank:{word:'Treasure', hint:'T _ _ _ _ _ _'}
+  },
+  {
+    id:'en14',
+    en:`If you're lucky enough to be someone's reason to get out of bed, treasure that.`,
+    zh:`如果你足够幸运，成了某人起床的理由，请珍惜这一点。`,
+    words:[
+      {w:'lucky enough to', m:'足够幸运得以……（adj + enough to do）', ex:`He was lucky enough to win. 他够幸运赢了。`},
+      {w:"someone's reason to", m:'某人……的理由（reason to do）', ex:`You are my reason to smile. 你是我微笑的理由。`},
+      {w:'get out of bed', m:'起床', ex:`I got out of bed late. 我起晚了。`}
+    ],
+    grammar:`if 引导条件状语从句；lucky enough to do 用 enough to 结构；reason to do 用不定式作定语；主句 treasure that 中 that 指代前文整件事。`,
+    test:{q:`"lucky enough to be..." 中 enough 的位置说明？`,
+      options:['enough 放在形容词前','enough 放在形容词后（adj + enough to）','enough 是名词','位置随意'],
+      answer:1,
+      explain:`enough 修饰形容词时要后置，构成 adj + enough to do 结构。`},
+    blank:{word:'get out of bed', hint:'g _ _  o _ _  o _  b _ _'}
+  },
+  {
+    id:'en15',
+    en:`No matter how hard you try to avoid being cringe, you will be cringe.`,
+    zh:`无论你多努力想避免尴尬，你终究还是会尴尬。`,
+    words:[
+      {w:'No matter how', m:'无论多么（引导让步状语从句）', ex:`No matter how busy, call me. 无论多忙，给我打电话。`},
+      {w:'avoid', m:'/əˈvɔɪd/ v. 避免（后接 doing）', ex:`Avoid making mistakes. 避免犯错。`},
+      {w:'cringe', m:'/krɪndʒ/ n.&v. 尴尬', ex:`Don't cringe. 别尴尬了。`}
+    ],
+    grammar:`no matter how + 形容词/副词 引导让步状语从句，意为"无论多么……"；avoid 后接动名词 being cringe；主句 you will be cringe 用 be + 名词/形容词表状态。`,
+    test:{q:`"No matter how" 引导的是哪类从句？`,
+      options:['时间状语从句','让步状语从句"无论多么"','定语从句','结果状语从句'],
+      answer:1,
+      explain:`no matter how 引导让步状语从句，意为"无论多么……"。`},
+    blank:{word:'avoid being cringe', hint:'a _ _ _ _  b _ _ _ _  c _ _ _ _ _'}
+  },
+  {
+    id:'en16',
+    en:`I'd like to thank the people who helped me get here.`,
+    zh:`我想感谢那些帮助我走到今天的人。`,
+    words:[
+      {w:"I'd like to", m:'我想 / 我愿意（would like to 的缩写）', ex:`I'd like to help. 我愿意帮忙。`},
+      {w:'thank', m:'/θæŋk/ v. 感谢', ex:`Thank you for coming. 感谢你来。`},
+      {w:'get here', m:'走到这里 / 取得今天的成绩', ex:`We finally got here. 我们终于走到这一步。`}
+    ],
+    grammar:`would like to do 委婉表达"想做……"；who helped me get here 是定语从句修饰 people；help sb (to) do 中 get 用原形。`,
+    test:{q:`"I'd like to" 是哪种表达的缩写？`,
+      options:['I would like to','I did like to','I had liked to','I do like to'],
+      answer:0,
+      explain:`I'd like to = I would like to，委婉表示"我想 / 我愿意"。`},
+    blank:{word:'get here', hint:'g _ _  h _ _ _'}
   }
 ];
 
 function renderEn(){
+  VIEW = tabD();
   let nav = `<div class="en-subnav">
     <button class="${enSubview==='read'?'active':''}" onclick="enSubview='read';renderEn()">练读进度</button>
     <button class="${enSubview==='explain'?'active':''}" onclick="enSubview='explain';renderEn()">语句拆分讲解</button>
     <button class="${enSubview==='test'?'active':''}" onclick="enSubview='test';renderEn()">语句拆分测试</button>
+    <button class="${enSubview==='shadow'?'active':''}" onclick="enSubview='shadow';renderEn()">语句跟读</button>
   </div>`;
   let body = '';
   if(enSubview==='read') body = renderEnRead();
   else if(enSubview==='explain') body = renderEnExplain();
   else if(enSubview==='test') body = renderEnTest();
-  document.getElementById('contentArea').innerHTML = nav + body;
+  else if(enSubview==='shadow') body = renderEnShadow();
+  document.getElementById('contentArea').innerHTML = dateBarHtml() + nav + body;
 }
 
 function renderEnRead(){
+  let ro = canEdit()?'':'readonly';
   return `<div class="placeholder" style="padding-top:8px">
     <div class="icon" style="font-size:40px">🇬🇧</div>
     <h2>练读进度</h2>
-    <p>正在练读 Taylor Swift 纽约大学毕业演讲，记录你的进度与难点：</p>
+    <p>练读 Taylor Swift 纽约大学毕业演讲，记录你的进度与难点：</p>
     <div style="margin-top:16px;background:var(--card);border-radius:10px;padding:14px;box-shadow:var(--shadow);width:100%;text-align:left">
-      <div style="font-size:14px;font-weight:600;margin-bottom:8px">📌 今日练读笔记</div>
-      <textarea class="notes-box" style="min-height:60px" placeholder="记录练读进度、遇到的难点、发音注意点..." oninput="lsRaw('wb_notes_en_${TODAY}',this.value)">${lsRaw(`wb_notes_en_${TODAY}`)}</textarea>
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px">📌 ${VIEW} 练读笔记</div>
+      <textarea class="notes-box" style="min-height:60px" ${ro} placeholder="记录练读进度、遇到的难点、发音注意点..." oninput="lsRaw('wb_notes_en_'+VIEW,this.value)">${lsRaw('wb_notes_en_'+VIEW)}</textarea>
     </div>
   </div>`;
 }
 
 function renderEnExplain(){
-  let head = `<div class="en-head">📺 语料来自 <a href="https://b23.tv/jSeAoIV" target="_blank" rel="noopener">Taylor Swift 纽约大学毕业演讲（Bilibili）</a>，以下为精选语句拆解：</div>`;
-  let cards = EN_LESSONS.map(les=>{
+  let lessons = dailyEnLessons(VIEW);
+  let learned = enLearned();
+  let done = lessons.filter(l=>learned[l.id]).length;
+  let head = `<div class="en-head">📺 语料来自 <a href="https://b23.tv/jSeAoIV" target="_blank" rel="noopener">Taylor Swift 纽约大学毕业演讲（Bilibili）</a>　·　每日 10 句（${VIEW}）</div>
+    <div class="en-subhead">已学 <b>${done}</b> / ${lessons.length}${canEdit()?`<button class="en-submit" style="margin-left:auto" onclick="enResetLearned()">重置</button>`:''}</div>`;
+  let cards = lessons.map(les=>{
+    let isL = !!learned[les.id];
     let words = les.words.map(w=>`<div class="en-word"><div class="w">${w.w}</div><div class="m">${w.m}</div><div class="ex">${w.ex}</div></div>`).join('');
+    let btn = canEdit()
+      ? `<button class="en-badge ${isL?'on':'off'}" onclick="enToggleLearned('${les.id}')">${isL?'✅ 已学':'○ 标记已学'}</button>`
+      : `<span class="en-badge ${isL?'on':'off'}">${isL?'✅ 已学':'○ 未学'}</span>`;
     return `<div class="en-lesson">
       <div class="en-sentence">${les.en}</div>
       <div class="en-zh">${les.zh}</div>
+      ${btn}
       <div class="sec-title">🔤 单词 / 短语拆解</div>
       ${words}
       <div class="sec-title">💡 语法 / 用法点拨</div>
@@ -1134,63 +1422,138 @@ function renderEnExplain(){
   }).join('');
   return head + cards;
 }
+function enToggleLearned(id){ if(!enGuard())return; let s=enLearned(); s[id]=!s[id]; ls('wb_en_learned_'+VIEW,s); renderEn(); }
+function enResetLearned(){ if(!enGuard())return; ls('wb_en_learned_'+VIEW,{}); renderEn(); }
 
-function getEnTestState(){
-  try{ return JSON.parse(localStorage.getItem('wb_en_test')||'{}'); }catch{ return {}; }
+function enAnsMc(i, oi){
+  if(!enGuard())return;
+  let items=dailyEnTests(VIEW); let it=items[i];
+  let ok = oi===it.les.test.answer;
+  let s=enTestState(); s[i]={ans:oi, ok, sub:true}; ls('wb_en_test_'+VIEW,s); renderEn();
 }
+function enSetAns(i, txt){
+  let s=enTestState(); let cur=s[i]||{}; cur.txt=txt; s[i]=cur; ls('wb_en_test_'+VIEW,s);
+}
+function enSubmitAns(i){
+  if(!enGuard())return;
+  let items=dailyEnTests(VIEW); let it=items[i]; let keys=enKeys(it.les.en);
+  let s=enTestState(); let cur=s[i]||{}; let n=norm(cur.txt);
+  if(it.type==='blank'){
+    let ans=norm(it.les.blank.word);
+    cur.ok = (n===ans)||(ans&&n.indexOf(ans)>=0);
+    cur.hit = cur.ok?1:0;
+  } else {
+    let hit=keys.filter(k=>n.indexOf(k)>=0).length;
+    cur.hit=hit; cur.ok = hit===keys.length && n.length>0;
+  }
+  cur.sub=true; s[i]=cur; ls('wb_en_test_'+VIEW,s); renderEn();
+}
+function enRetryAns(i){
+  let s=enTestState(); let cur=s[i]||{}; cur.sub=false; cur.ok=false; delete cur.txt; s[i]=cur; ls('wb_en_test_'+VIEW,s); renderEn();
+}
+function enResetTest(){ if(!enGuard())return; ls('wb_en_test_'+VIEW,{}); renderEn(); }
+
 function renderEnTest(){
-  let state = getEnTestState();
-  let total = EN_LESSONS.length;
-  let done = 0, correct = 0;
-  EN_LESSONS.forEach((les,i)=>{ if(state[i]!=null){ done++; if(state[i]===les.test.answer) correct++; } });
-  let scoreHtml = `<div class="en-score"><span>已答 ${done}/${total} ｜ 正确 ${correct}</span><button class="sync-btn" onclick="resetEnTest()">重置</button></div>`;
-  let cards = EN_LESSONS.map((les,i)=>{
-    let chosen = state[i];
-    let opts = les.test.options.map((o,oi)=>{
-      let cls='en-opt';
-      let dis='';
-      if(chosen!=null){
-        dis='disabled';
-        if(oi===les.test.answer) cls+=' correct';
-        else if(oi===chosen) cls+=' wrong';
-      }
-      return `<button class="${cls}" ${dis} onclick="selectEnTest(${i},${oi})">${o}</button>`;
-    }).join('');
-    let exp = (chosen!=null) ? `<div class="en-explain">✅ 解析：${les.test.explain}</div>` : '';
-    return `<div class="en-test-q">
-      <div class="q">${i+1}. ${les.test.q}</div>
-      ${opts}
-      ${exp}
-    </div>`;
+  let items = dailyEnTests(VIEW);
+  let state = enTestState();
+  let total = items.length;
+  let done=0, correct=0;
+  items.forEach((it,i)=>{ let r=state[i]; if(r&&r.sub){ done++; if(r.ok) correct++; } });
+  let head = `<div class="en-score"><span>已答 ${done}/${total} ｜ 正确 ${correct}</span>${canEdit()?`<button class="sync-btn" onclick="enResetTest()">重置</button>`:''}</div>`;
+  let cards = items.map((it,i)=>{
+    let r = state[i];
+    let typeLabel = it.type==='mc'?'选择题':(it.type==='blank'?'挖空填空':'中译英');
+    let inner='';
+    if(it.type==='mc'){
+      let t=it.les.test;
+      let opts=t.options.map((o,oi)=>{
+        let cls='en-opt'; let dis='';
+        if(r&&r.sub){ dis='disabled'; if(oi===t.answer) cls+=' correct'; else if(oi===r.ans&&!r.ok) cls+=' wrong'; }
+        return `<button class="${cls}" ${dis} onclick="enAnsMc(${i},${oi})">${o}</button>`;
+      }).join('');
+      let exp = (r&&r.sub)? `<div class="en-explain">${r.ok?'✅':'❌'} 解析：${t.explain}</div>` : '';
+      inner = `<div class="q">${i+1}. ${t.q}</div>${opts}${exp}`;
+    } else if(it.type==='blank'){
+      let b=it.les.blank;
+      let prompt=it.les.en.replace(b.word, `____(${b.hint})____`);
+      let val = (r&&r.txt!=null)? r.txt : '';
+      let dis = (r&&r.sub)? 'disabled':'';
+      let cls = 'en-cloze-input' + (r&&r.sub?(r.ok?' ok':' wrong'):'');
+      let exp = (r&&r.sub)? `<div class="en-explain">${r.ok?'✅':'❌'} 答案：<b>${b.word}</b></div>`:'';
+      let act = (r&&r.sub)? `<button class="en-submit" onclick="enRetryAns(${i})">重答</button>` : `<button class="en-submit" onclick="enSubmitAns(${i})">提交</button>`;
+      inner = `<div class="q">${i+1}. 挖空填空：<br><span class="en-zh">${prompt}</span></div>
+        <input class="${cls}" ${dis} value="${val.replace(/"/g,'&quot;')}" placeholder="填入被挖掉的单词/短语" oninput="enSetAns(${i},this.value)">${exp}${act}`;
+    } else {
+      let keys = enKeys(it.les.en);
+      let val = (r&&r.txt!=null)? r.txt : '';
+      let dis = (r&&r.sub)? 'disabled':'';
+      let cls = 'en-zh-input' + (r&&r.sub?(r.ok?' ok':' wrong'):'');
+      let keyHint = keys.map(k=>`<span class="en-key">${k}</span>`).join(' ');
+      let exp = (r&&r.sub)? `<div class="en-explain">关键词命中 ${r.hit||0}/${keys.length} ${r.ok?'✅':'❌'}　参考：<b>${it.les.en}</b></div>`:'';
+      let act = (r&&r.sub)? `<button class="en-submit" onclick="enRetryAns(${i})">重答</button>` : `<button class="en-submit" onclick="enSubmitAns(${i})">提交</button>`;
+      inner = `<div class="q">${i+1}. 中译英：<br><span class="en-zh">${it.les.zh}</span></div>
+        <div style="margin:6px 0;font-size:12px;color:var(--gray)">提示关键词：${keyHint}</div>
+        <input class="${cls}" ${dis} value="${val.replace(/"/g,'&quot;')}" placeholder="写出对应的英文句子" oninput="enSetAns(${i},this.value)">${exp}${act}`;
+    }
+    return `<div class="en-test-q"><span class="en-tag">${typeLabel}</span>${inner}</div>`;
   }).join('');
   if(total===0) return `<div class="en-empty">暂无测试题</div>`;
-  return scoreHtml + cards;
+  return head + cards;
 }
-function selectEnTest(i, oi){
-  let state = getEnTestState();
-  state[i] = oi;
-  localStorage.setItem('wb_en_test', JSON.stringify(state));
-  renderEn();
+
+function renderEnShadow(){
+  let lessons = dailyEnLessons(VIEW);
+  let st = enShadowState();
+  let done = lessons.filter(l=>st[l.id]).length;
+  let head = `<div class="en-head">🎧 语句跟读：点击「播放原声」听朗读，跟读后点「标记已跟读」。</div>
+    <div class="en-subhead">已跟读 <b>${done}</b> / ${lessons.length}${canEdit()?`<button class="en-submit" style="margin-left:auto" onclick="enResetShadow()">重置</button>`:''}</div>`;
+  let cards = lessons.map((les,idx)=>{
+    let isS = !!st[les.id];
+    let btn = canEdit()
+      ? `<button class="en-badge ${isS?'on':'off'}" onclick="enToggleShadow('${les.id}')">${isS?'✅ 已跟读':'○ 标记已跟读'}</button>`
+      : `<span class="en-badge ${isS?'on':'off'}">${isS?'✅ 已跟读':'○ 未跟读'}</span>`;
+    return `<div class="en-lesson">
+      <div class="en-sentence">${les.en}</div>
+      <div class="en-zh">${les.zh}</div>
+      <div class="en-shadow-row">
+        <button class="en-play" onclick="enSpeak(${idx})">▶ 播放原声</button>
+        <button class="en-play" style="background:#5a9" onclick="enSpeak(${idx});enToggleShadow('${les.id}')">跟读并标记</button>
+        ${btn}
+      </div>
+    </div>`;
+  }).join('');
+  return head + cards;
 }
-function resetEnTest(){
-  localStorage.removeItem('wb_en_test');
-  renderEn();
+function enSpeak(idx){
+  if(typeof speechSynthesis==='undefined'){ toast('当前浏览器不支持语音朗读'); return; }
+  let les = dailyEnLessons(VIEW)[idx];
+  if(!les) return;
+  try{ speechSynthesis.cancel(); }catch(e){}
+  let u = new SpeechSynthesisUtterance(les.en);
+  u.lang='en-US'; u.rate=0.92; u.pitch=1;
+  speechSynthesis.speak(u);
 }
+function enToggleShadow(id){ if(!enGuard())return; let s=enShadowState(); s[id]=!s[id]; ls('wb_en_shadow_'+VIEW,s); renderEn(); }
+function enResetShadow(){ if(!enGuard())return; ls('wb_en_shadow_'+VIEW,{}); renderEn(); }
 
 // ============ Tab4: Python学习 ============
 function getPyTasks(){
-  let tasks = ls(`wb_py_${TODAY}`)||[];
+  let tasks = ls(`wb_py_${VIEW}`)||[];
   tasks.forEach(migrateTaskState);
   return tasks;
 }
 function savePyTasks(tasks){
-  ls(`wb_py_${TODAY}`,tasks);
+  ls(`wb_py_${VIEW}`,tasks);
 }
 function renderPy(){
+  VIEW = tabD();
+  let past = !canEdit();
+  let ro = past ? 'readonly' : '';
   let tasks = getPyTasks();
-  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+  let html = dateBarHtml();
+  html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
     <div style="font-size:17px;font-weight:700">Python 学习</div>
-    <button class="add-btn" onclick="showAddPyModal()" title="添加任务">+</button>
+    ${past?'':`<button class="add-btn" onclick="showAddPyModal()" title="添加任务">+</button>`}
   </div>`;
   if(tasks.length===0){
     html += `<div class="empty-state"><div class="icon">🐍</div><p>暂无任务，点击 + 添加</p></div>`;
@@ -1208,28 +1571,33 @@ function renderPy(){
       </div>`;
     });
   }
-  let notes = lsRaw(`wb_notes_py_${TODAY}`);
+  let notes = lsRaw(`wb_notes_py_${VIEW}`);
   html += `<div class="notes-section"><label>📝 学习备注</label>
-    <textarea class="notes-box" oninput="lsRaw('wb_notes_py_${TODAY}',this.value)" placeholder="学习心得、踩坑记录...">${notes}</textarea></div>`;
+    <textarea class="notes-box" ${ro} oninput="lsRaw('wb_notes_py_${VIEW}',this.value)" placeholder="学习心得、踩坑记录...">${notes}</textarea></div>`;
   document.getElementById('contentArea').innerHTML = html;
   tasks.forEach((_,i)=>initSwipe(document.getElementById('pyItem'+i),()=>deletePy(i)));
 }
 function togglePy(i){
+  if(!canEdit()){ toast('往期记录为只读'); return; }
   let tasks=getPyTasks(); if(!tasks[i]) return;
   tasks[i].state=cycleState(tasks[i].state);savePyTasks(tasks);renderPy();
 }
 function deletePy(i){
+  if(!canEdit()){ toast('往期记录为只读'); return; }
   let tasks=getPyTasks();tasks.splice(i,1);savePyTasks(tasks);renderPy();
 }
 function editPyText(i,el){
+  if(!canEdit()){ toast('往期记录为只读'); return; }
   let tasks=getPyTasks();let cur=tasks[i].text;
   el.innerHTML=`<input type="text" value="${cur}" style="width:100%;border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:14px;font-family:inherit;outline:none" onblur="finishEditPy(${i},this)" onkeydown="if(event.key==='Enter')this.blur()">`;
   el.querySelector('input').focus();
 }
 function finishEditPy(i,input){
+  if(!canEdit()) return;
   let tasks=getPyTasks();tasks[i].text=input.value.trim()||tasks[i].text;savePyTasks(tasks);renderPy();
 }
 function showAddPyModal(){
+  if(!canEdit()){ toast('往期记录为只读'); return; }
   document.getElementById('modalTitle').textContent='添加 Python 任务';
   document.getElementById('taskInput').value='';
   document.getElementById('modal').classList.add('show');
@@ -1267,10 +1635,14 @@ const READ_PROMPTS = [
 let _selectedReadTag = '';
 
 function renderRead(){
+  VIEW = tabD();
+  let past = !canEdit();
   let entries = ls('wb_read_entries')||[];
-  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+  let viewList = entries.map((e,i)=>({e,i})).filter(o=>o.e.date===VIEW);
+  let html = dateBarHtml();
+  html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
     <div style="font-size:17px;font-weight:700">📖 阅读小计</div>
-    <button class="add-btn" onclick="toggleReadForm()" title="添加阅读记录">+</button>
+    ${past?'':`<button class="add-btn" onclick="toggleReadForm()" title="添加阅读记录">+</button>`}
   </div>`;
 
   // 添加表单
@@ -1310,17 +1682,17 @@ function renderRead(){
   </div>`;
 
   // 记录列表
-  if(entries.length===0){
-    html += `<div class="empty-state"><div class="icon">📖</div><p>暂无记录，点击 + 添加第一条</p></div>`;
+  if(viewList.length===0){
+    html += `<div class="empty-state"><div class="icon">📖</div><p>${past?VIEW+' 无阅读记录':'暂无记录，点击 + 添加第一条'}</p></div>`;
   } else {
-    entries.forEach((e,i)=>{
+    viewList.forEach(({e,i})=>{
       let tag = READ_TAGS.find(t=>t.key===e.tag);
       let tagHtml = tag ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:${tag.color}15;color:${tag.color};font-size:11px;font-weight:600;margin-right:6px">${tag.label}</span>` : '';
       html += `<div class="task-item" style="margin-bottom:10px">
         <div class="task-content" style="flex-direction:column;align-items:stretch">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
             <div style="font-size:12px;color:var(--gray)">${e.date}${e.progress?' · '+e.progress:''}</div>
-            <button onclick="deleteReadEntry(${i})" style="background:none;border:none;color:#999;font-size:18px;line-height:1;padding:0 4px;cursor:pointer">×</button>
+            ${past?'':`<button onclick="deleteReadEntry(${i})" style="background:none;border:none;color:#999;font-size:18px;line-height:1;padding:0 4px;cursor:pointer">×</button>`}
           </div>
           <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:4px">
             ${tagHtml}
@@ -1335,9 +1707,9 @@ function renderRead(){
       </div>`;
     });
   }
-  let notes = lsRaw(`wb_notes_read_${TODAY}`);
+  let notes = lsRaw(`wb_notes_read_${VIEW}`);
   html += `<div class="notes-section"><label>📝 阅读备注</label>
-    <textarea class="notes-box" oninput="lsRaw('wb_notes_read_${TODAY}',this.value)" placeholder="阅读相关备注...">${notes}</textarea></div>`;
+    <textarea class="notes-box" ${past?'readonly':''} oninput="lsRaw('wb_notes_read_${VIEW}',this.value)" placeholder="阅读相关备注...">${notes}</textarea></div>`;
   document.getElementById('contentArea').innerHTML = html;
 }
 
@@ -1467,6 +1839,42 @@ syncInit().then(()=>{
 </script>
 <script>
 if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(function(){}); }
+</script>
+<div class="pull-indicator" id="pullIndicator">↓ 下拉同步数据</div>
+<div class="toast" id="toast"></div>
+<script>
+// ============ 下拉刷新 = 同步数据 ============
+(function(){
+  let ca = document.getElementById('contentArea');
+  let startY = null, dist = 0, active = false;
+  const TH = 64;
+  ca.addEventListener('touchstart', e=>{
+    if(ca.scrollTop <= 0){ startY = e.touches[0].clientY; active = true; dist = 0; }
+  }, {passive:true});
+  ca.addEventListener('touchmove', e=>{
+    if(!active || startY===null) return;
+    let y = e.touches[0].clientY;
+    dist = y - startY;
+    if(dist > 0 && ca.scrollTop <= 0){
+      let ind = document.getElementById('pullIndicator');
+      let p = Math.min(dist, TH+40);
+      ind.style.transform = 'translateX(-50%) translateY(' + (p-38) + 'px)';
+      ind.classList.add('show');
+      ind.textContent = dist >= TH ? '↑ 松开同步数据' : '↓ 下拉同步数据';
+    }
+  }, {passive:true});
+  ca.addEventListener('touchend', ()=>{
+    let ind = document.getElementById('pullIndicator');
+    if(active && dist >= TH){
+      ind.textContent = '同步中…';
+      if(typeof syncNow === 'function') syncNow().then(()=>{ toast('已同步'); setTimeout(()=>ind.classList.remove('show'), 400); })
+                            .catch(()=>{ toast('同步失败'); setTimeout(()=>ind.classList.remove('show'), 400); });
+    } else {
+      ind.classList.remove('show');
+    }
+    active = false; startY = null; dist = 0;
+  });
+})();
 </script>
 </body>
 </html>
