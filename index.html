@@ -178,8 +178,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
   <div><h1>暴躁汤的工作台</h1><div class="date" id="dateDisplay"></div></div>
 </div>
 <div class="syncbar" id="syncbar" style="display:none">
-  <span class="sync-status" id="syncStatus">☁ 未同步</span>
-  <button class="sync-btn" onclick="syncNow()">同步数据</button>
+  <span class="sync-status" id="syncStatus">☁ 自动同步中</span>
   <button class="sync-btn" onclick="openSyncSettings()">设置</button>
   <button class="sync-btn" onclick="exportData()">导出</button>
   <button class="sync-btn" onclick="document.getElementById('importFile').click()">导入</button>
@@ -224,7 +223,15 @@ const SYNC = location.protocol.startsWith('http');
 const GIST_FILE = 'workbench-data.json';
 const GH_API = 'https://api.github.com';
 
-function getCfg(){ try{ return JSON.parse(localStorage.getItem('wb_sync_cfg')||'{}'); }catch{ return {}; } }
+// 固定共享 Gist（数据层，非秘密，公开也无害）
+const DEFAULT_GIST_ID = 'f1b64df8193001e7f979f2589cced21c';
+function getCfg(){
+  try{
+    let c = JSON.parse(localStorage.getItem('wb_sync_cfg')||'{}');
+    if(!c.gistId) c.gistId = DEFAULT_GIST_ID;
+    return c;
+  }catch{ return {gistId:DEFAULT_GIST_ID}; }
+}
 function setCfg(c){ localStorage.setItem('wb_sync_cfg', JSON.stringify(c)); }
 
 // 深合并两个对象/数组（数组按索引逐项合并，对象递归，标量取较新/云端优先）
@@ -275,7 +282,8 @@ function setSyncStatus(txt, ok=true){
 }
 function syncMarkDirty(){
   if(!SYNC) return;
-  setSyncStatus('有改动，点「同步数据」');
+  setSyncStatus('有改动，同步中…');
+  scheduleSync();
 }
 
 async function ghFetch(path, opts={}){
@@ -308,11 +316,20 @@ async function gistPush(obj){
   await ghFetch('/gists/'+id, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({files:{[GIST_FILE]:{content: JSON.stringify(obj)}}})});
 }
 
-// 手动同步：拉云端 → 合并 → 写本地+刷新 → 推云端
+// 自动同步：拉云端 → 合并 → 写本地+刷新 → 推云端
+let _syncing = false;
+let _syncDebounce = null;
+// 数据改动后 5 秒自动触发一次同步（与 30 秒定时互补，减少手动等待）
+function scheduleSync(){
+  if(_syncDebounce) clearTimeout(_syncDebounce);
+  _syncDebounce = setTimeout(()=>{ syncNow(); }, 5000);
+}
 async function syncNow(){
+  if(_syncing) return;
   let cfg=getCfg();
-  if(!cfg.token){ openSyncSettings(); return; }
-  if(!navigator.onLine){ setSyncStatus('离线，无法同步', false); return; }
+  if(!cfg.token){ return; }            // 未配置 Token 时静默，不弹框打断
+  if(!navigator.onLine){ return; }
+  _syncing = true;
   setSyncStatus('同步中…');
   try{
     let cloud = await gistPull();
@@ -337,27 +354,37 @@ async function syncNow(){
   }catch(e){
     setSyncStatus('同步失败：'+(e.stack||e.message||'网络错误').split('\n')[0], false);
     console.error('sync error', e);
+  }finally{
+    _syncing = false;
   }
 }
 
 function openSyncSettings(){
   let cfg=getCfg();
-  let token = prompt('粘贴 GitHub Token（需 gist 权限，建议 fine-grained 仅 gist）：', cfg.token||'');
+  let token = prompt('粘贴 GitHub Token（需 gist 权限，建议 fine-grained 仅 gist）：\n\n固定 Gist 已内置，只需填 Token 即可自动同步。', cfg.token||'');
   if(token===null) return;
   token=token.trim();
-  let gistId = prompt('Gist ID（首次同步留空会自动创建）：', cfg.gistId||'');
-  if(gistId===null) return;
-  cfg.token=token; cfg.gistId=gistId.trim();
+  cfg.token=token;
+  cfg.gistId=DEFAULT_GIST_ID;   // Gist ID 固定，不向用户询问
   setCfg(cfg);
-  setSyncStatus('已保存，点「同步数据」开始');
+  setSyncStatus('已保存，自动同步中…');
+  syncNow();
 }
 
 async function syncInit(){
   if(!SYNC) return;
   document.getElementById('syncbar').style.display='flex';
-  let last=localStorage.getItem('wb_last_sync');
-  if(last){ let t=new Date(last); setSyncStatus('上次同步 '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')); }
-  else setSyncStatus('未同步，点「同步数据」');
+  let cfg=getCfg();
+  if(!cfg.token){
+    setSyncStatus('未配置 Token，点「设置」');
+  }else{
+    let last=localStorage.getItem('wb_last_sync');
+    if(last){ let t=new Date(last); setSyncStatus('上次同步 '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')); }
+    else setSyncStatus('未同步');
+    // 每 30 秒自动同步一次
+    setInterval(syncNow, 30000);
+    syncNow();
+  }
 }
 
 function exportData(){
