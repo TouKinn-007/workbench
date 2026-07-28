@@ -228,14 +228,22 @@ const GH_API = 'https://api.github.com';
 function getCfg(){ try{ return JSON.parse(localStorage.getItem('wb_sync_cfg')||'{}'); }catch{ return {}; } }
 function setCfg(c){ localStorage.setItem('wb_sync_cfg', JSON.stringify(c)); }
 
-// 深合并两个对象（数组按 id 去重，对象递归，标量取非空/本地优先）
+// 深合并两个对象/数组（数组按索引逐项合并，对象递归，标量取较新/云端优先）
 function deepObjMerge(a,b){
   if(Array.isArray(a) && Array.isArray(b)){
-    let map = new Map();
-    [...a, ...b].forEach(it=>{ let id=(it&&typeof it==='object'&&it.id!=null)?it.id:JSON.stringify(it); map.set(id, it); });
-    return [...map.values()];
+    let len = Math.max(a.length, b.length);
+    let out = [];
+    for(let i=0;i<len;i++){
+      let av=a[i], bv=b[i];
+      if(av===undefined) out[i]=bv;
+      else if(bv===undefined) out[i]=av;
+      else if(av&&typeof av==='object'&&bv&&typeof bv==='object'&&!Array.isArray(av)&&!Array.isArray(bv)) out[i]=deepObjMerge(av,bv);
+      else if(Array.isArray(av)&&Array.isArray(bv)) out[i]=deepObjMerge(av,bv);
+      else out[i]=bv; // 标量冲突时以云端/较新为准
+    }
+    return out;
   }
-  let out = Array.isArray(a) ? [...a] : {...a};
+  let out = Array.isArray(a) ? [...a] : (a&&typeof a==='object' ? {...a} : {});
   for(let k in b){
     let av=a[k], bv=b[k];
     if(av&&typeof av==='object'&&bv&&typeof bv==='object'&&!Array.isArray(av)&&!Array.isArray(bv)) out[k]=deepObjMerge(av,bv);
@@ -328,7 +336,8 @@ async function syncNow(){
     localStorage.setItem('wb_last_sync', t.toISOString());
     setSyncStatus('已同步 '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0'));
   }catch(e){
-    setSyncStatus('同步失败：'+(e.message||'网络错误'), false);
+    setSyncStatus('同步失败：'+(e.stack||e.message||'网络错误').split('\n')[0], false);
+    console.error('sync error', e);
   }
 }
 
@@ -408,9 +417,10 @@ let chartOffset = 0;
 // plan_history: { date: [ {done, note} ] }  索引0-5是普通任务
 function getPlanToday(){
   let h = ls('wb_plan_history') || {};
-  if(!h[TODAY]) h[TODAY] = PLAN_TASKS.slice(0,6).map(()=>({state:0,note:''}));
+  if(!Array.isArray(h[TODAY])) h[TODAY] = PLAN_TASKS.slice(0,6).map(()=>({state:0,note:''}));
   // 兼容旧数据 done -> state
   h[TODAY].forEach(t=>{
+    if(!t || typeof t !== 'object') return;
     if(t.state===undefined) t.state = t.done===true ? 2 : 0;
     delete t.done;
   });
@@ -419,7 +429,7 @@ function getPlanToday(){
 }
 function getHealthToday(){
   let h = ls('wb_health_history') || {};
-  if(!h[TODAY]) h[TODAY] = {noSnack:false, intermittent:false, weight:null};
+  if(!h[TODAY] || typeof h[TODAY] !== 'object' || Array.isArray(h[TODAY])) h[TODAY] = {noSnack:false, intermittent:false, weight:null};
   ls('wb_health_history', h);
   return h;
 }
@@ -451,6 +461,7 @@ function renderPlan(){
   // 0-5: 普通任务
   for(let i=0;i<6;i++){
     let t = today[i];
+    if(!t){ t = today[i] = {state:0,note:''}; }
     let chkClass = t.state===2 ? 'checked' : t.state===1 ? 'incomplete' : '';
     let itemClass = t.state===1 ? 'incomplete-state' : '';
     html += `<div class="task-item ${itemClass}" data-idx="${i}">
@@ -818,6 +829,8 @@ function renderWork(){
     html += `<div class="empty-state"><div class="icon">💼</div><p>暂无任务，点击 + 添加</p></div>`;
   } else {
     tasks.forEach((t,i)=>{
+      if(!t) return;
+      if(!t.children) t.children=[];
       let pChk = t.state===2?'checked':t.state===1?'incomplete':'';
       let pItemClass = t.state===1?'incomplete-state':'';
       html += `<div class="task-item ${pItemClass}" data-idx="${i}" id="workItem${i}">
@@ -829,9 +842,10 @@ function renderWork(){
           </div>
         </div>`;
       // 子任务
-      if(t.children && t.children.length>0){
+      if(Array.isArray(t.children) && t.children.length>0){
         html += `<div class="subtask-list">`;
         t.children.forEach((c,j)=>{
+          if(!c) return;
           let sChk = c.state===2?'checked':c.state===1?'incomplete':'';
           html += `<div class="subtask-item">
             <div class="task-checkbox ${sChk}" onclick="toggleWorkSub(${i},${j})"></div>
@@ -864,10 +878,12 @@ function renderWork(){
 
 function cycleState(state){ return (state===undefined?0:state)+1 > 2 ? 0 : (state===undefined?0:state)+1; }
 function toggleWork(i){
-  let tasks=getWorkTasks();tasks[i].state=cycleState(tasks[i].state);saveWorkTasks(tasks);renderWork();
+  let tasks=getWorkTasks(); if(!tasks[i]) return;
+  tasks[i].state=cycleState(tasks[i].state);saveWorkTasks(tasks);renderWork();
 }
 function toggleWorkSub(i,j){
   let tasks=getWorkTasks();
+  if(!tasks[i] || !tasks[i].children || !tasks[i].children[j]) return;
   let c = tasks[i].children[j];
   c.state = cycleState(c.state);
   // 子项全完成后，一级任务自动完成
@@ -969,6 +985,7 @@ function renderPy(){
     html += `<div class="empty-state"><div class="icon">🐍</div><p>暂无任务，点击 + 添加</p></div>`;
   } else {
     tasks.forEach((t,i)=>{
+      if(!t) return;
       let chk = t.state===2?'checked':t.state===1?'incomplete':'';
       let itemClass = t.state===1?'incomplete-state':'';
       html += `<div class="task-item ${itemClass}" id="pyItem${i}">
@@ -987,7 +1004,8 @@ function renderPy(){
   tasks.forEach((_,i)=>initSwipe(document.getElementById('pyItem'+i),()=>deletePy(i)));
 }
 function togglePy(i){
-  let tasks=getPyTasks();tasks[i].state=cycleState(tasks[i].state);savePyTasks(tasks);renderPy();
+  let tasks=getPyTasks(); if(!tasks[i]) return;
+  tasks[i].state=cycleState(tasks[i].state);savePyTasks(tasks);renderPy();
 }
 function deletePy(i){
   let tasks=getPyTasks();tasks.splice(i,1);savePyTasks(tasks);renderPy();
