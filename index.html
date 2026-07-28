@@ -1,0 +1,1130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>暴躁汤的工作台</title>
+<meta name="theme-color" content="#e8603c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="暴躁汤">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-512.png">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#f5f5f7;--card:#fff;--accent:#e8603c;--text:#1a1a1a;
+  --gray:#999;--darkgray:#aaa;--border:#e8e8e8;
+  --shadow:0 1px 8px rgba(0,0,0,.06);--blue:#4285f4;--green:#34a853;--red:#e8603c;
+  --sidebar-bg:#fafafa;--sidebar-w:96px;
+}
+html,body{min-height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column}
+
+/* 顶栏 */
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--border);flex-shrink:0}
+.topbar h1{font-size:18px;font-weight:700;letter-spacing:-0.5px}
+.topbar .date{font-size:11px;color:var(--gray);margin-top:1px}
+.daily-rate{font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px;background:#f0f0f2}
+.syncbar{display:flex;align-items:center;gap:8px;padding:7px 16px;background:#eef4ff;border-bottom:1px solid var(--border);flex-shrink:0}
+.sync-status{font-size:12px;color:#4285f4;font-weight:600;margin-right:auto}
+.sync-btn{font-size:12px;padding:4px 12px;border:1px solid #bcd2ff;background:#fff;color:#4285f4;border-radius:6px;cursor:pointer;font-family:inherit}
+.sync-btn:hover{background:#f0f6ff}
+
+/* 左右布局 */
+.main-layout{display:flex;flex:1;min-height:0}
+
+/* 左侧 Tab */
+.sidebar{width:var(--sidebar-w);background:var(--sidebar-bg);border-right:1px solid var(--border);display:flex;flex-direction:column;padding-top:8px;overflow-y:auto;flex-shrink:0;position:sticky;top:0;align-self:flex-start;max-height:100vh}
+.tab-btn{display:flex;flex-direction:column;align-items:center;padding:10px 4px;cursor:pointer;border:none;background:transparent;color:var(--text);font-size:12px;font-weight:500;transition:all .2s;position:relative;font-family:inherit;gap:3px}
+.tab-btn .tab-icon{font-size:20px;line-height:1}
+.tab-btn .tab-label{font-size:11px;white-space:nowrap}
+.tab-btn:hover{background:#edeef0}
+.tab-btn.active{background:var(--card);color:var(--accent)}
+.tab-btn.active::after{content:'';position:absolute;right:0;top:16%;height:68%;width:3px;background:var(--accent);border-radius:2px 0 0 2px}
+
+/* 右侧内容 */
+.content-area{flex:1;display:flex;flex-direction:column;padding:12px 16px 16px;min-height:0}
+
+/* === 通用任务样式 === */
+.task-item{position:relative;overflow:hidden;background:var(--card);border-radius:10px;margin-bottom:8px;box-shadow:var(--shadow);transition:all .25s}
+.task-item.swiping{transition:none}
+.task-content{display:flex;align-items:flex-start;padding:12px 14px;gap:10px;position:relative;z-index:2;background:var(--card);min-height:48px}
+.task-checkbox{width:18px;height:18px;border:2px solid var(--border);border-radius:3px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0;margin-top:2px}
+.task-checkbox.checked{background:var(--accent);border-color:var(--accent)}
+.task-checkbox.checked::after{content:'✓';color:#fff;font-size:12px;font-weight:700}
+.task-checkbox.blue-check{background:var(--blue);border-color:var(--blue)}
+.task-checkbox.blue-check::after{content:'✓';color:#fff;font-size:12px;font-weight:700}
+.task-checkbox.red-check{background:var(--red);border-color:var(--red)}
+.task-checkbox.red-check::after{content:'✗';color:#fff;font-size:12px;font-weight:700}
+.task-checkbox.incomplete{background:#fff;border-color:var(--red)}
+.task-checkbox.incomplete::after{content:'×';color:var(--red);font-size:15px;font-weight:700}
+.task-item.incomplete-state{background:#fff5f5}
+.task-item.incomplete-state .task-content{background:#fff5f5}
+.subtask-item .task-checkbox.incomplete{background:#fff;border-color:var(--red)}
+.subtask-item .task-checkbox.incomplete::after{content:'×';color:var(--red);font-size:13px;font-weight:700}
+.task-text{font-size:14px;line-height:1.5;transition:all .3s;flex:1;cursor:pointer}
+.task-text.done{text-decoration:line-through;color:var(--darkgray)}
+.task-text.incomplete{color:var(--red)}
+.task-note-input{width:100%;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:12px;outline:none;font-family:inherit;resize:none;margin-top:4px;transition:border-color .2s}
+.task-note-input:focus{border-color:var(--accent)}
+.task-note-input::placeholder{color:#ccc}
+.delete-zone{position:absolute;right:12px;top:10px;height:28px;width:48px;background:var(--red);display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;z-index:1;cursor:pointer;border-radius:0 8px 8px 0;box-shadow:0 2px 6px rgba(232,96,60,.3)}
+
+/* 子任务 */
+.subtask-list{padding:0 14px 8px 42px}
+.subtask-item{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;position:relative}
+.subtask-item .task-checkbox{width:16px;height:16px;border-radius:3px;margin-top:0}
+.subtask-item .subtask-text{flex:1;transition:all .3s}
+.subtask-item .subtask-text.done{text-decoration:line-through;color:var(--darkgray)}
+.subtask-add{display:flex;align-items:center;gap:6px;padding:4px 0;font-size:12px;color:var(--gray);cursor:pointer;margin-left:42px}
+.subtask-add:hover{color:var(--accent)}
+.subtask-add input{flex:1;border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px;outline:none;font-family:inherit}
+.sub-del{width:14px;height:14px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#bbb;cursor:pointer;margin-left:4px;transition:color .15s}
+.sub-del:hover{color:#888}
+
+/* 健康饮食特殊样式 */
+.health-row{display:flex;align-items:center;gap:10px;padding:6px 0;flex-wrap:wrap}
+.health-tag{display:flex;align-items:center;gap:4px;font-size:13px}
+.health-tag .label{font-weight:500}
+.health-tag .tag-check{width:16px;height:16px;border:2px solid var(--border);border-radius:3px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s}
+.health-tag .tag-check.blue{background:var(--blue);border-color:var(--blue)}
+.health-tag .tag-check.blue::after{content:'✓';color:#fff;font-size:10px;font-weight:700}
+.health-tag .tag-check.red{background:var(--red);border-color:var(--red)}
+.health-tag .tag-check.red::after{content:'✗';color:#fff;font-size:10px;font-weight:700}
+.weight-input{display:flex;align-items:center;gap:6px;font-size:13px}
+.weight-input input{width:70px;border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:13px;outline:none;font-family:inherit;text-align:center;-moz-appearance:textfield}
+.weight-input input::-webkit-inner-spin-button,.weight-input input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.weight-input .weight-arrow{font-size:12px;font-weight:700}
+.weight-arrow.up{color:var(--red)}
+.weight-arrow.down{color:var(--blue)}
+.weight-arrow.flat{color:#333}
+
+/* 弹窗 */
+.modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.35);z-index:100;display:none;align-items:center;justify-content:center}
+.modal-overlay.show{display:flex}
+.modal{background:var(--card);border-radius:14px;padding:20px;width:90%;max-width:400px;box-shadow:0 8px 32px rgba(0,0,0,.15);animation:slideUp .25s}
+.modal h2{font-size:16px;font-weight:700;margin-bottom:12px}
+.modal-actions{display:flex;gap:8px;margin-top:14px;justify-content:flex-end}
+.modal-actions button{padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;border:none;font-family:inherit;font-weight:500}
+.btn-cancel{background:#eee;color:var(--text)}
+.btn-confirm{background:var(--accent);color:#fff}
+
+/* 统计弹窗 */
+.stats-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.35);z-index:100;display:none;align-items:center;justify-content:center}
+.stats-overlay.show{display:flex}
+.stats-card{background:var(--card);border-radius:14px;padding:24px;width:90%;max-width:360px;box-shadow:0 8px 32px rgba(0,0,0,.15);text-align:center;animation:slideUp .25s}
+.stats-card .task-name{font-size:16px;font-weight:700;margin-bottom:16px}
+.stats-card .stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+.stats-card .stat-box{background:#f5f5f7;border-radius:10px;padding:12px;text-align:center}
+.stats-card .stat-box .val{font-size:20px;font-weight:700;color:var(--accent)}
+.stats-card .stat-box .lbl{font-size:11px;color:var(--gray);margin-top:2px}
+.stats-card .rate-bar{height:8px;background:#eee;border-radius:4px;margin:12px 0 4px;overflow:hidden}
+.stats-card .rate-fill{height:100%;background:var(--accent);border-radius:4px;transition:width .4s}
+.stats-card .rate-label{font-size:12px;color:var(--gray)}
+
+/* 图表区 */
+.chart-section{background:var(--card);border-radius:10px;padding:14px;margin-bottom:8px;box-shadow:var(--shadow)}
+.chart-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.chart-nav{display:flex;align-items:center;gap:8px}
+.chart-nav-btn{width:28px;height:28px;border-radius:6px;background:#eee;border:none;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text);font-family:inherit}
+.chart-nav-btn:hover{background:#ddd}
+.chart-period{font-size:12px;color:var(--gray);min-width:80px;text-align:center}
+.chart-tabs{display:flex;gap:6px;margin-bottom:10px}
+.chart-tab{padding:4px 12px;border-radius:6px;font-size:12px;cursor:pointer;background:#eee;border:none;font-family:inherit;color:var(--text)}
+.chart-tab.active{background:var(--accent);color:#fff}
+.chart-container{position:relative;width:100%;aspect-ratio:2/1;max-height:260px}
+.chart-container svg{width:100%;height:100%;display:block}
+
+/* 空状态 */
+.empty-state{text-align:center;padding:40px 20px;color:var(--gray)}
+.empty-state .icon{font-size:36px;margin-bottom:8px;opacity:.4}
+.empty-state p{font-size:13px}
+
+/* 备注区 */
+.notes-section{margin-top:12px;padding-top:10px;border-top:1px solid var(--border)}
+.notes-section label{font-size:12px;color:var(--gray);display:block;margin-bottom:4px;font-weight:500}
+.notes-box{width:100%;min-height:56px;border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;line-height:1.5;resize:vertical;font-family:inherit;background:var(--card);outline:none;transition:border-color .2s}
+.notes-box:focus{border-color:var(--accent)}
+
+/* Placeholder tab */
+.placeholder{display:flex;flex-direction:column;align-items:center;padding:32px 20px;text-align:center;color:var(--gray)}
+.placeholder .icon{font-size:48px;opacity:.4;margin-bottom:12px}
+.placeholder h2{font-size:17px;font-weight:700;color:var(--text);margin-bottom:8px}
+.placeholder p{font-size:13px;line-height:1.6;max-width:320px}
+.placeholder .feature-list{margin-top:16px;text-align:left;font-size:13px;line-height:2}
+.placeholder .feature-list li::marker{color:var(--accent)}
+
+.add-btn{width:34px;height:34px;border-radius:50%;background:var(--accent);color:#fff;border:none;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform .15s;box-shadow:0 2px 8px rgba(232,96,60,.3)}
+.add-btn:hover{transform:scale(1.1)}
+.add-btn:active{transform:scale(.95)}
+
+@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes slideOut{from{transform:translateX(0);opacity:1}to{transform:translateX(60px);opacity:0}}
+.task-item.removing{animation:slideOut .25s forwards}
+
+@media(max-width:480px){
+  .sidebar{width:68px}
+  .tab-btn .tab-label{font-size:10px}
+  .tab-btn .tab-icon{font-size:16px}
+  .content-area{padding:10px 12px 14px}
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div><h1>暴躁汤的工作台</h1><div class="date" id="dateDisplay"></div></div>
+  <div class="daily-rate" id="dailyRate">今日 0%</div>
+</div>
+<div class="syncbar" id="syncbar" style="display:none">
+  <span class="sync-status" id="syncStatus">☁ 未同步</span>
+  <button class="sync-btn" onclick="syncNow()">同步数据</button>
+  <button class="sync-btn" onclick="openSyncSettings()">设置</button>
+  <button class="sync-btn" onclick="exportData()">导出</button>
+  <button class="sync-btn" onclick="document.getElementById('importFile').click()">导入</button>
+  <input type="file" id="importFile" accept="application/json" style="display:none" onchange="importData(this)">
+</div>
+
+<div class="main-layout">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="content-area" id="contentArea"></div>
+</div>
+
+<!-- 添加任务弹窗 -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h2 id="modalTitle">添加任务</h2>
+    <input type="text" id="taskInput" placeholder="输入任务内容..." maxlength="120">
+    <div class="modal-actions">
+      <button class="btn-cancel" id="cancelBtn">取消</button>
+      <button class="btn-confirm" id="confirmBtn">添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- 统计弹窗 -->
+<div class="stats-overlay" id="statsOverlay">
+  <div class="stats-card" id="statsCard"></div>
+</div>
+
+<script>
+// === 工具 ===
+const now = new Date();
+const TODAY = now.toISOString().slice(0,10);
+const WEEKDAYS = ['日','一','二','三','四','五','六'];
+document.getElementById('dateDisplay').textContent = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 周${WEEKDAYS[now.getDay()]}`;
+
+function ls(k,v){ if(v!==undefined){localStorage.setItem(k,JSON.stringify(v)); syncMarkDirty();}else{try{return JSON.parse(localStorage.getItem(k))}catch{return null}} }
+function lsRaw(k,v){ if(v!==undefined){ localStorage.setItem(k,v); syncMarkDirty(); } else return localStorage.getItem(k)||''; }
+
+// ============ 同步层（GitHub Gist 合并同步）============
+// 任意 http(s) 环境（云端部署 / 穿透 / localhost）启用；file:// 纯本地。
+const SYNC = location.protocol.startsWith('http');
+const GIST_FILE = 'workbench-data.json';
+const GH_API = 'https://api.github.com';
+
+function getCfg(){ try{ return JSON.parse(localStorage.getItem('wb_sync_cfg')||'{}'); }catch{ return {}; } }
+function setCfg(c){ localStorage.setItem('wb_sync_cfg', JSON.stringify(c)); }
+
+// 深合并两个对象（数组按 id 去重，对象递归，标量取非空/本地优先）
+function deepObjMerge(a,b){
+  if(Array.isArray(a) && Array.isArray(b)){
+    let map = new Map();
+    [...a, ...b].forEach(it=>{ let id=(it&&typeof it==='object'&&it.id!=null)?it.id:JSON.stringify(it); map.set(id, it); });
+    return [...map.values()];
+  }
+  let out = Array.isArray(a) ? [...a] : {...a};
+  for(let k in b){
+    let av=a[k], bv=b[k];
+    if(av&&typeof av==='object'&&bv&&typeof bv==='object'&&!Array.isArray(av)&&!Array.isArray(bv)) out[k]=deepObjMerge(av,bv);
+    else if(Array.isArray(av)&&Array.isArray(bv)) out[k]=deepObjMerge(av,bv);
+    else out[k]=bv;
+  }
+  return out;
+}
+// 合并两个 localStorage 原始字符串值（a=本地, b=云端）
+function mergeRaw(a,b){
+  let pa,pb;
+  try{ pa=JSON.parse(a); }catch{ pa=undefined; }
+  try{ pb=JSON.parse(b); }catch{ pb=undefined; }
+  if(pa!==undefined && pb!==undefined && typeof pa==='object' && typeof pb==='object'){
+    return JSON.stringify(deepObjMerge(pa,pb));
+  }
+  if(a && a!=='null' && a!=='""' && a!=='{}') return a;
+  if(b && b!=='null' && b!=='""' && b!=='{}') return b;
+  return a || b || '';
+}
+
+function syncCollect(){
+  let o={};
+  for(let i=0;i<localStorage.length;i++){ let k=localStorage.key(i); o[k]=localStorage.getItem(k); }
+  return o;
+}
+function setSyncStatus(txt, ok=true){
+  let el=document.getElementById('syncStatus');
+  if(el){ el.textContent=txt; el.style.color = ok?'#4285f4':'#e8603c'; }
+}
+function syncMarkDirty(){
+  if(!SYNC) return;
+  setSyncStatus('有改动，点「同步数据」');
+}
+
+async function ghFetch(path, opts={}){
+  let cfg=getCfg();
+  opts.headers = Object.assign({'Accept':'application/vnd.github+json','User-Agent':'workbench','Authorization':'Bearer '+(cfg.token||'')}, opts.headers||{});
+  return fetch(GH_API+path, opts);
+}
+async function ensureGist(){
+  let cfg=getCfg();
+  if(cfg.gistId) return cfg.gistId;
+  let res = await ghFetch('/gists', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({description:'暴躁汤工作台同步数据', public:false, files:{[GIST_FILE]:{content: JSON.stringify(syncCollect())}}})});
+  let j = await res.json();
+  cfg.gistId = j.id;
+  setCfg(cfg);
+  return cfg.gistId;
+}
+async function gistPull(){
+  let cfg=getCfg();
+  if(!cfg.gistId) return {};
+  try{
+    let res = await ghFetch('/gists/'+cfg.gistId);
+    if(!res.ok) return {};
+    let j = await res.json();
+    let content = j.files && j.files[GIST_FILE] && j.files[GIST_FILE].content;
+    return content ? JSON.parse(content) : {};
+  }catch(e){ return {}; }
+}
+async function gistPush(obj){
+  let id = await ensureGist();
+  await ghFetch('/gists/'+id, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({files:{[GIST_FILE]:{content: JSON.stringify(obj)}}})});
+}
+
+// 手动同步：拉云端 → 合并 → 写本地+刷新 → 推云端
+async function syncNow(){
+  let cfg=getCfg();
+  if(!cfg.token){ openSyncSettings(); return; }
+  if(!navigator.onLine){ setSyncStatus('离线，无法同步', false); return; }
+  setSyncStatus('同步中…');
+  try{
+    let cloud = await gistPull();
+    let local = syncCollect();
+    let merged = {};
+    let keys = new Set([...Object.keys(local), ...Object.keys(cloud)]);
+    keys.forEach(k=>{
+      if(k==='wb_sync_cfg') return;
+      let a=local[k], b=cloud[k];
+      if(a==null) merged[k]=b;
+      else if(b==null) merged[k]=a;
+      else merged[k]=mergeRaw(a,b);
+    });
+    localStorage.clear();
+    setCfg(cfg);
+    for(let k in merged) localStorage.setItem(k, merged[k]);
+    renderSidebar(); renderActiveTab();
+    await gistPush(merged);
+    let t=new Date();
+    localStorage.setItem('wb_last_sync', t.toISOString());
+    setSyncStatus('已同步 '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0'));
+  }catch(e){
+    setSyncStatus('同步失败：'+(e.message||'网络错误'), false);
+  }
+}
+
+function openSyncSettings(){
+  let cfg=getCfg();
+  let token = prompt('粘贴 GitHub Token（需 gist 权限，建议 fine-grained 仅 gist）：', cfg.token||'');
+  if(token===null) return;
+  token=token.trim();
+  let gistId = prompt('Gist ID（首次同步留空会自动创建）：', cfg.gistId||'');
+  if(gistId===null) return;
+  cfg.token=token; cfg.gistId=gistId.trim();
+  setCfg(cfg);
+  setSyncStatus('已保存，点「同步数据」开始');
+}
+
+async function syncInit(){
+  if(!SYNC) return;
+  document.getElementById('syncbar').style.display='flex';
+  let last=localStorage.getItem('wb_last_sync');
+  if(last){ let t=new Date(last); setSyncStatus('上次同步 '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')); }
+  else setSyncStatus('未同步，点「同步数据」');
+}
+
+function exportData(){
+  let data=syncCollect();
+  let blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  let a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='暴躁汤工作台数据备份.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+async function importData(input){
+  let file=input.files[0];
+  if(!file) return;
+  let reader=new FileReader();
+  reader.onload=async (e)=>{
+    try{
+      let obj=JSON.parse(e.target.result);
+      localStorage.clear(); setCfg(getCfg());
+      for(let k in obj) localStorage.setItem(k, obj[k]);
+      await gistPush(syncCollect());
+      alert('导入成功，已同步到云端');
+      location.reload();
+    }catch(err){ alert('导入失败：文件格式不正确'); }
+  };
+  reader.readAsText(file);
+  input.value='';
+}
+
+
+// === Tab 定义 ===
+const PLAN_TASKS = [
+  '早睡早起（22:00~06:20）',
+  '玩手机不超过2H',
+  '运动1小时',
+  '阅读',
+  '学习新技能①',
+  '学习新技能②',
+  '健康饮食',
+  '体重曲线图'
+];
+
+const TABS = [
+  {id:'work',  icon:'💼', label:'工作任务', color:'#4285f4'},
+  {id:'plan',  icon:'🔥', label:'重启计划', color:'#e8603c'},
+  {id:'en',    icon:'🇬🇧', label:'英语学习', color:'#9c27b0'},
+  {id:'py',    icon:'🐍', label:'Python',  color:'#34a853'},
+  {id:'read',  icon:'📖', label:'阅读小计', color:'#ff9800'},
+];
+
+let activeTab = 'work';
+let currentChartRange = 'week';
+let chartOffset = 0;
+
+// ============ Tab1: 重启计划 ============
+// plan_history: { date: [ {done, note} ] }  索引0-5是普通任务
+function getPlanToday(){
+  let h = ls('wb_plan_history') || {};
+  if(!h[TODAY]) h[TODAY] = PLAN_TASKS.slice(0,6).map(()=>({state:0,note:''}));
+  // 兼容旧数据 done -> state
+  h[TODAY].forEach(t=>{
+    if(t.state===undefined) t.state = t.done===true ? 2 : 0;
+    delete t.done;
+  });
+  ls('wb_plan_history', h);
+  return h;
+}
+function getHealthToday(){
+  let h = ls('wb_health_history') || {};
+  if(!h[TODAY]) h[TODAY] = {noSnack:false, intermittent:false, weight:null};
+  ls('wb_health_history', h);
+  return h;
+}
+function getWeightHistory(){
+  return ls('wb_weight_history') || {};
+}
+
+// 计算今日完成率（0-5 + 健康2项 = 8项可完成，体重曲线不算）
+function calcDailyRate(){
+  let h = getPlanToday();
+  let ht = getHealthToday();
+  let today = h[TODAY];
+  let done = today.filter(t=>t.state===2).length;
+  if(ht[TODAY].noSnack) done++;
+  if(ht[TODAY].intermittent) done++;
+  let pct = Math.round(done/8*100);
+  document.getElementById('dailyRate').textContent = `今日 ${pct}%`;
+  document.getElementById('dailyRate').style.background = pct>=80?'#e0f5e0':pct>=50?'#fff3e0':'#f0f0f2';
+}
+
+// 渲染重启计划
+function renderPlan(){
+  let h = getPlanToday();
+  let ht = getHealthToday();
+  let today = h[TODAY];
+  let wh = getWeightHistory();
+  let html = '';
+
+  // 0-5: 普通任务
+  for(let i=0;i<6;i++){
+    let t = today[i];
+    let chkClass = t.state===2 ? 'checked' : t.state===1 ? 'incomplete' : '';
+    let itemClass = t.state===1 ? 'incomplete-state' : '';
+    html += `<div class="task-item ${itemClass}" data-idx="${i}">
+      <div class="task-content">
+        <div class="task-checkbox ${chkClass}" onclick="togglePlan(${i})"></div>
+        <div style="flex:1">
+          <div class="task-text ${t.state===2?'done':''} ${t.state===1?'incomplete':''}" onclick="showPlanStats(${i})">${PLAN_TASKS[i]}</div>
+          <textarea class="task-note-input" rows="1" placeholder="完成心得/具体内容..." oninput="savePlanNote(${i},this.value)" onfocus="this.rows=2" onblur="if(!this.value)this.rows=1">${t.note||''}</textarea>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // 6: 健康饮食
+  let health = ht[TODAY];
+  let prevWeight = null;
+  // 找前一天的体重
+  let allDates = Object.keys(wh).sort();
+  for(let d=allDates.length-1;d>=0;d--){
+    if(allDates[d]<TODAY && wh[allDates[d]]!==null && wh[allDates[d]]!==undefined){prevWeight=wh[allDates[d]];break;}
+  }
+  let curWeight = health.weight;
+  let arrow = '';
+  if(curWeight){
+    if(prevWeight){
+      let diff = curWeight - prevWeight;
+      if(diff>0) arrow = `<span class="weight-arrow up">↑${diff.toFixed(2)}kg</span>`;
+      else if(diff<0) arrow = `<span class="weight-arrow down">↓${Math.abs(diff).toFixed(2)}kg</span>`;
+      else arrow = `<span class="weight-arrow flat">→0.00kg</span>`;
+    } else {
+      arrow = `<span class="weight-arrow flat">→无昨日数据</span>`;
+    }
+  }
+  html += `<div class="task-item" style="overflow:visible">
+    <div class="task-content" style="flex-direction:column;align-items:stretch;min-height:auto;padding:14px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <div class="task-checkbox ${(health.noSnack&&health.intermittent&&curWeight)?'checked':''}" onclick="checkHealthAll()"></div>
+        <div class="task-text" style="font-weight:600">健康饮食</div>
+      </div>
+      <div class="health-row" style="flex-wrap:wrap">
+        <div class="health-tag" style="cursor:pointer" onclick="toggleHealth('noSnack')">
+          <span class="label">无零食</span>
+          <div class="tag-check ${health.noSnack?'blue':''}"></div>
+        </div>
+        <div class="health-tag" style="cursor:pointer" onclick="toggleHealth('intermittent')">
+          <span class="label">16+8</span>
+          <div class="tag-check ${health.intermittent?'blue':''}"></div>
+        </div>
+      </div>
+      <div class="health-row" style="padding-top:2px">
+        <div class="weight-input">
+          <span>早体重</span>
+          <input type="text" inputmode="decimal" placeholder="kg" value="${curWeight||''}" oninput="saveWeight(this.value)" onblur="saveWeightCommit(this)">
+          <span id="weightArrow">${arrow}</span>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
+  // 7: 体重曲线图
+  html += `<div class="chart-section">
+    <div style="font-size:14px;font-weight:600;margin-bottom:8px">📊 体重曲线图</div>
+    <div class="chart-tabs" id="chartTabs">
+      <button class="chart-tab active" onclick="switchChartRange('week')">周</button>
+      <button class="chart-tab" onclick="switchChartRange('month')">月</button>
+      <button class="chart-tab" onclick="switchChartRange('year')">年</button>
+    </div>
+    <div class="chart-nav">
+      <button class="chart-nav-btn" onclick="chartPrev()">◀</button>
+      <div class="chart-period" id="chartPeriodLabel"></div>
+      <button class="chart-nav-btn" onclick="chartNext()">▶</button>
+    </div>
+    <div class="chart-container"><svg id="weightSvg" viewBox="0 0 400 200" preserveAspectRatio="xMidYMid meet"></svg></div>
+  </div>`;
+
+  // 备注区
+  let notes = lsRaw(`wb_notes_plan_${TODAY}`);
+  html += `<div class="notes-section">
+    <label>📝 今日备注 / 心得</label>
+    <textarea class="notes-box" oninput="lsRaw('wb_notes_plan_${TODAY}',this.value)" placeholder="记录今天完成情况...">${notes}</textarea>
+  </div>`;
+
+  document.getElementById('contentArea').innerHTML = html;
+  // 健康饮食不需要滑动删除
+  chartOffset = 0;
+  currentChartRange = 'week';
+  renderWeightChart();
+}
+
+function togglePlan(i){
+  let h = getPlanToday();
+  let t = h[TODAY][i];
+  t.state = (t.state===undefined?0:t.state)+1;
+  if(t.state>2) t.state=0;
+  ls('wb_plan_history', h);
+  calcDailyRate(); renderPlan();
+}
+function savePlanNote(i,val){
+  let h = getPlanToday();
+  h[TODAY][i].note = val;
+  ls('wb_plan_history', h);
+}
+
+function toggleHealth(field){
+  let ht = getHealthToday();
+  ht[TODAY][field] = !ht[TODAY][field];
+  ls('wb_health_history', ht);
+  calcDailyRate(); renderPlan();
+}
+function checkHealthAll(){
+  let ht = getHealthToday();
+  let h = ht[TODAY];
+  let allDone = h.noSnack && h.intermittent && h.weight;
+  h.noSnack = !allDone;
+  h.intermittent = !allDone;
+  ls('wb_health_history', ht);
+  calcDailyRate(); renderPlan();
+}
+function saveWeight(val){
+  let ht = getHealthToday();
+  let w = parseFloat(val);
+  ht[TODAY].weight = isNaN(w)?null:w;
+  ls('wb_health_history', ht);
+  let wh = getWeightHistory();
+  wh[TODAY] = isNaN(w)?null:w;
+  ls('wb_weight_history', wh);
+  // 只更新箭头和图表，不重渲染（避免输入框失焦）
+  updateWeightArrow(isNaN(w)?null:w);
+  renderWeightChart();
+}
+function saveWeightCommit(input){
+  // 输入完成时清洗并回写
+  let v = input.value.trim();
+  if(v==='') return;
+  if(!/^\d+(\.\d{0,2})?$/.test(v)){
+    // 非法值：清理为只保留数字+单个小数点+最多2位小数
+    let cleaned = v.replace(/[^0-9.]/g,'');
+    let parts = cleaned.split('.');
+    if(parts.length>2) cleaned = parts[0]+'.'+parts.slice(1).join('');
+    if(cleaned.includes('.')){
+      let [a,b] = cleaned.split('.');
+      cleaned = a+'.'+(b||'').slice(0,2);
+    }
+    input.value = cleaned;
+    saveWeight(cleaned);
+  }
+}
+function updateWeightArrow(curWeight){
+  let arrowEl = document.getElementById('weightArrow');
+  if(!arrowEl) return;
+  let wh = getWeightHistory();
+  let dates = Object.keys(wh).filter(d=>wh[d]!==null&&wh[d]!==undefined).sort();
+  let prevWeight = null;
+  for(let i=dates.length-1;i>=0;i--){
+    if(dates[i]<TODAY && wh[dates[i]]!==null){prevWeight=wh[dates[i]];break;}
+  }
+  let html='';
+  if(curWeight!==null && curWeight!==undefined){
+    if(prevWeight){
+      let diff = curWeight - prevWeight;
+      if(diff>0) html = `<span class="weight-arrow up">↑${diff.toFixed(2)}kg</span>`;
+      else if(diff<0) html = `<span class="weight-arrow down">↓${Math.abs(diff).toFixed(2)}kg</span>`;
+      else html = `<span class="weight-arrow flat">→0.00kg</span>`;
+    } else {
+      html = `<span class="weight-arrow flat">→无昨日数据</span>`;
+    }
+  }
+  arrowEl.innerHTML = html;
+}
+
+function showPlanStats(i){
+  let h = ls('wb_plan_history')||{};
+  let dates = Object.keys(h).sort();
+  let totalDays = dates.length;
+  let completed = dates.filter(d=>h[d][i]&&h[d][i].state===2).length;
+  let rate = totalDays===0?0:Math.round(completed/totalDays*100);
+  let card = document.getElementById('statsCard');
+  card.innerHTML = `
+    <div class="task-name">${PLAN_TASKS[i]}</div>
+    <div class="stats-grid">
+      <div class="stat-box"><div class="val">${totalDays}</div><div class="lbl">记录天数</div></div>
+      <div class="stat-box"><div class="val">${completed}</div><div class="lbl">完成次数</div></div>
+    </div>
+    <div class="rate-bar"><div class="rate-fill" style="width:${rate}%"></div></div>
+    <div class="rate-label">总完成率 ${rate}%</div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn-cancel" onclick="document.getElementById('statsOverlay').classList.remove('show')">关闭</button>
+    </div>`;
+  document.getElementById('statsOverlay').classList.add('show');
+}
+
+function switchChartRange(range){
+  currentChartRange = range;
+  chartOffset = 0;
+  document.querySelectorAll('.chart-tab').forEach(b=>b.classList.remove('active'));
+  event.target.classList.add('active');
+  renderWeightChart();
+}
+function chartPrev(){ chartOffset--; renderWeightChart(); }
+function chartNext(){ chartOffset++; renderWeightChart(); }
+
+function getWeekRange(offset){
+  let d = new Date(TODAY + 'T00:00:00');
+  d.setDate(d.getDate() + offset*7);
+  // 以自然周（周一~周日）为准
+  let day = d.getDay(); // 0=周日 1=周一 ... 6=周六
+  let diffToMonday = (day === 0) ? -6 : (1 - day);
+  let start = new Date(d); start.setDate(start.getDate() + diffToMonday);
+  let end = new Date(start); end.setDate(start.getDate() + 6);
+  function fmt(x){return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;}
+  return {start: fmt(start), end: fmt(end), label: `${fmt(start).slice(5)} ~ ${fmt(end).slice(5)}`};
+}
+function getMonthRange(offset){
+  let d = new Date(TODAY);
+  d.setMonth(d.getMonth() + offset, 1);
+  let y = d.getFullYear(), m = d.getMonth();
+  let daysInMonth = new Date(y, m+1, 0).getDate();
+  let start = `${y}-${String(m+1).padStart(2,'0')}-01`;
+  let end = `${y}-${String(m+1).padStart(2,'0')}-${daysInMonth}`;
+  let mName = `${y}年${m+1}月`;
+  return {start, end, label: mName, daysInMonth, y, m};
+}
+function getYearRange(offset){
+  let d = new Date(TODAY);
+  let y = d.getFullYear() + offset;
+  return {start: `${y}-01-01`, end: `${y}-12-31`, label: `${y}年`, y};
+}
+
+function renderWeightChart(){
+  let wh = getWeightHistory();
+  let dates = Object.keys(wh).filter(d=>wh[d]!==null&&wh[d]!==undefined).sort();
+  let labels=[], data=[], periodLabel='';
+  
+  if(currentChartRange==='week'){
+    let range = getWeekRange(chartOffset);
+    periodLabel = range.label;
+    const weekDays = ['日','一','二','三','四','五','六'];
+    // 当前周 7 天全部显示，无数据留空
+    let cur = new Date(range.start+'T00:00:00');
+    let end = new Date(range.end+'T00:00:00');
+    function localDateStr(dt){
+      return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+    }
+    while(cur<=end){
+      let d = localDateStr(cur);
+      let day = cur.getDay();
+      labels.push({date:d.slice(5), day:`周${weekDays[day]}`});
+      data.push(wh[d]!==null&&wh[d]!==undefined?wh[d]:null);
+      cur.setDate(cur.getDate()+1);
+    }
+  } else if(currentChartRange==='month'){
+    let range = getMonthRange(chartOffset);
+    periodLabel = range.label;
+    // 显示该月每天的数据
+    for(let day=1;day<=range.daysInMonth;day++){
+      let dateStr = `${range.y}-${String(range.m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+      labels.push(String(day));
+      data.push(wh[dateStr]!==null&&wh[dateStr]!==undefined?wh[dateStr]:null);
+    }
+  } else if(currentChartRange==='year'){
+    let range = getYearRange(chartOffset);
+    periodLabel = range.label;
+    // 每月平均值
+    for(let m=0;m<12;m++){
+      let mStr = String(m+1).padStart(2,'0');
+      let mDates = dates.filter(d=>d.startsWith(`${range.y}-${mStr}`));
+      if(mDates.length>0){
+        let avg = mDates.reduce((s,d)=>s+wh[d],0)/mDates.length;
+        labels.push(`${m+1}月`);
+        data.push(Math.round(avg*100)/100);
+      } else {
+        labels.push(`${m+1}月`);
+        data.push(null);
+      }
+    }
+  }
+
+  let periodEl = document.getElementById('chartPeriodLabel');
+  if(periodEl) periodEl.textContent = periodLabel;
+
+  // SVG 折线图（横线连接，无曲线）
+  let svgEl = document.getElementById('weightSvg');
+  if(!svgEl) return;
+  let W=400, H=200, padL=38, padR=14, padT=14, padB=36;
+  let plotW = W - padL - padR;
+  let plotH = H - padT - padB;
+  let pts = [];
+  for(let i=0;i<labels.length;i++){
+    if(data[i]!==null&&data[i]!==undefined) pts.push({idx:i, v:data[i]});
+  }
+  let out = '';
+  if(pts.length===0){
+    out = `<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="#999" font-size="13">暂无数据，先记几天体重吧~</text>`;
+    svgEl.setAttribute('viewBox',`0 0 ${W} ${H}`);
+    svgEl.innerHTML = out;
+    return;
+  }
+  let vals = pts.map(p=>p.v);
+  let yMin = Math.min(...vals), yMax = Math.max(...vals);
+  let yPad = (yMax-yMin)===0 ? 1 : (yMax-yMin)*0.15;
+  yMin -= yPad; yMax += yPad;
+  let yRange = yMax - yMin;
+  let n = labels.length;
+  let xAt = (i) => n===1 ? padL + plotW/2 : padL + plotW * i / (n-1);
+  let yAt = (v) => padT + plotH - ((v - yMin) / yRange) * plotH;
+  // Y轴网格+刻度
+  for(let i=0;i<=4;i++){
+    let v = yMin + yRange * i/4;
+    let yp = yAt(v);
+    out += `<line x1="${padL}" y1="${yp}" x2="${W-padR}" y2="${yp}" stroke="#f0f0f0" stroke-width="1"/>`;
+    out += `<text x="${padL-6}" y="${yp+3}" text-anchor="end" fill="#999" font-size="10">${v.toFixed(1)}</text>`;
+  }
+  // X轴标签
+  let step = Math.max(1, Math.ceil(n/8));
+  for(let i=0;i<n;i+=step){
+    let xp = xAt(i);
+    let lbl = labels[i];
+    if(typeof lbl==='object'){
+      out += `<text x="${xp}" y="${H-padB+12}" text-anchor="middle" fill="#999" font-size="9">${lbl.date}</text>`;
+      out += `<text x="${xp}" y="${H-padB+22}" text-anchor="middle" fill="#999" font-size="9">${lbl.day}</text>`;
+    } else {
+      out += `<text x="${xp}" y="${H-padB+14}" text-anchor="middle" fill="#999" font-size="10">${lbl}</text>`;
+    }
+  }
+  // 折线（直线连接）
+  if(pts.length>=2){
+    let d = '';
+    for(let k=0;k<pts.length;k++){
+      let xp = xAt(pts[k].idx);
+      let yp = yAt(pts[k].v);
+      d += (k===0?'M':'L') + xp.toFixed(1) + ',' + yp.toFixed(1) + ' ';
+    }
+    out += `<path d="${d}" stroke="#4285f4" stroke-width="2" fill="none" stroke-linejoin="round"/>`;
+  }
+  // 数据点
+  for(let p of pts){
+    out += `<circle cx="${xAt(p.idx).toFixed(1)}" cy="${yAt(p.v).toFixed(1)}" r="3.5" fill="#fff" stroke="#4285f4" stroke-width="2"/>`;
+  }
+  svgEl.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  svgEl.innerHTML = out;
+}
+
+// ============ Tab2: 工作任务 ============
+function migrateTaskState(t){
+  if(t.state===undefined) t.state = t.done===true ? 2 : 0;
+  delete t.done;
+  if(t.children) t.children.forEach(migrateTaskState);
+}
+function getWorkTasks(){
+  let tasks = ls(`wb_work_${TODAY}`)||[];
+  tasks.forEach(migrateTaskState);
+  return tasks;
+}
+function saveWorkTasks(tasks){
+  ls(`wb_work_${TODAY}`,tasks);
+}
+
+function renderWork(){
+  let tasks = getWorkTasks();
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <div style="font-size:17px;font-weight:700">工作任务</div>
+    <button class="add-btn" onclick="showAddWorkModal()" title="添加任务">+</button>
+  </div>`;
+  if(tasks.length===0){
+    html += `<div class="empty-state"><div class="icon">💼</div><p>暂无任务，点击 + 添加</p></div>`;
+  } else {
+    tasks.forEach((t,i)=>{
+      let pChk = t.state===2?'checked':t.state===1?'incomplete':'';
+      let pItemClass = t.state===1?'incomplete-state':'';
+      html += `<div class="task-item ${pItemClass}" data-idx="${i}" id="workItem${i}">
+        <div class="delete-zone" onclick="deleteWork(${i})">删除</div>
+        <div class="task-content">
+          <div class="task-checkbox ${pChk}" onclick="toggleWork(${i})"></div>
+          <div style="flex:1">
+            <div class="task-text ${t.state===2?'done':''} ${t.state===1?'incomplete':''}" onclick="editWorkText(${i},this)">${t.text}</div>
+          </div>
+        </div>`;
+      // 子任务
+      if(t.children && t.children.length>0){
+        html += `<div class="subtask-list">`;
+        t.children.forEach((c,j)=>{
+          let sChk = c.state===2?'checked':c.state===1?'incomplete':'';
+          html += `<div class="subtask-item">
+            <div class="task-checkbox ${sChk}" onclick="toggleWorkSub(${i},${j})"></div>
+            <div class="subtask-text ${c.state===2?'done':''} ${c.state===1?'incomplete':''}" onclick="editWorkSubText(${i},${j},this)">${c.text}</div>
+            <span class="sub-del" onclick="deleteWorkSub(${i},${j})">✕</span>
+          </div>`;
+        });
+        html += `</div>`;
+      }
+      html += `<div class="subtask-add" onclick="showAddSubInput(${i})">
+        <span>+ 子任务</span>
+      </div>
+      <div id="subInput${i}" style="display:none;padding:0 14px 8px 42px">
+        <input type="text" placeholder="输入子任务..." id="subInputField${i}" onkeydown="if(event.key==='Enter')addWorkSub(${i});if(event.key==='Escape')this.parentElement.style.display='none'">
+        <span style="font-size:12px;color:var(--accent);cursor:pointer;margin-left:4px" onclick="addWorkSub(${i})">添加</span>
+      </div>
+      <div style="padding:0 14px 10px">
+        <textarea class="task-note-input" rows="1" placeholder="完成情况 / 未完成原因..." oninput="saveWorkNote(${i},this.value)" onfocus="this.rows=2" onblur="if(!this.value)this.rows=1">${t.note||''}</textarea>
+      </div>
+    </div>`;
+    });
+  }
+  let notes = lsRaw(`wb_notes_work_${TODAY}`);
+  html += `<div class="notes-section"><label>📝 工作备注</label>
+    <textarea class="notes-box" oninput="lsRaw('wb_notes_work_${TODAY}',this.value)" placeholder="工作相关备注...">${notes}</textarea></div>`;
+  document.getElementById('contentArea').innerHTML = html;
+  // 初始化滑动
+  tasks.forEach((_,i)=>initSwipe(document.getElementById('workItem'+i),()=>deleteWork(i)));
+}
+
+function cycleState(state){ return (state===undefined?0:state)+1 > 2 ? 0 : (state===undefined?0:state)+1; }
+function toggleWork(i){
+  let tasks=getWorkTasks();tasks[i].state=cycleState(tasks[i].state);saveWorkTasks(tasks);renderWork();
+}
+function toggleWorkSub(i,j){
+  let tasks=getWorkTasks();
+  let c = tasks[i].children[j];
+  c.state = cycleState(c.state);
+  // 子项全完成后，一级任务自动完成
+  if(tasks[i].children.every(x=>x.state===2)) tasks[i].state=2;
+  else if(tasks[i].state===2) tasks[i].state=0;
+  saveWorkTasks(tasks);renderWork();
+}
+function saveWorkNote(i,val){
+  let tasks=getWorkTasks();tasks[i].note=val;saveWorkTasks(tasks);
+}
+function deleteWork(i){
+  let tasks=getWorkTasks();tasks.splice(i,1);saveWorkTasks(tasks);renderWork();
+}
+function deleteWorkSub(i,j){
+  let tasks=getWorkTasks();tasks[i].children.splice(j,1);saveWorkTasks(tasks);renderWork();
+}
+function editWorkText(i,el){
+  let tasks=getWorkTasks();
+  let cur=tasks[i].text;
+  el.innerHTML=`<input type="text" value="${cur}" style="width:100%;border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:14px;font-family:inherit;outline:none" onblur="finishEditWork(${i},this)" onkeydown="if(event.key==='Enter')this.blur()">`;
+  el.querySelector('input').focus();
+}
+function finishEditWork(i,input){
+  let tasks=getWorkTasks();tasks[i].text=input.value.trim()||tasks[i].text;saveWorkTasks(tasks);renderWork();
+}
+function editWorkSubText(i,j,el){
+  let tasks=getWorkTasks();let cur=tasks[i].children[j].text;
+  el.innerHTML=`<input type="text" value="${cur}" style="width:100%;border:1px solid var(--border);border-radius:4px;padding:3px;font-size:13px;font-family:inherit;outline:none" onblur="finishEditWorkSub(${i},${j},this)" onkeydown="if(event.key==='Enter')this.blur()">`;
+  el.querySelector('input').focus();
+}
+function finishEditWorkSub(i,j,input){
+  let tasks=getWorkTasks();tasks[i].children[j].text=input.value.trim()||tasks[i].children[j].text;saveWorkTasks(tasks);renderWork();
+}
+function showAddWorkModal(){
+  document.getElementById('modalTitle').textContent='添加工作任务';
+  document.getElementById('taskInput').value='';
+  document.getElementById('modal').classList.add('show');
+  setTimeout(()=>document.getElementById('taskInput').focus(),100);
+}
+function addWorkFromModal(){
+  let text=document.getElementById('taskInput').value.trim();
+  if(!text)return;
+  let tasks=getWorkTasks();
+  tasks.push({text,state:0,children:[],note:''});
+  saveWorkTasks(tasks);renderWork();
+  document.getElementById('modal').classList.remove('show');
+}
+function showAddSubInput(i){
+  let el=document.getElementById('subInput'+i);
+  el.style.display=el.style.display==='none'?'flex':'none';
+  if(el.style.display==='flex') document.getElementById('subInputField'+i).focus();
+}
+function addWorkSub(i){
+  let input=document.getElementById('subInputField'+i);
+  let text=input.value.trim();if(!text)return;
+  let tasks=getWorkTasks();
+  if(!tasks[i].children) tasks[i].children=[];
+  tasks[i].children.push({text,state:0});
+  saveWorkTasks(tasks);renderWork();
+}
+
+// ============ Tab3: 英语学习 ============
+function renderEn(){
+  let html = `<div class="placeholder">
+    <div class="icon">🇬🇧</div>
+    <h2>英语学习</h2>
+    <p>正在 Bilibili 练读 Taylor Swift 纽约大学毕业演讲，练读完成后将解锁以下功能：</p>
+    <ul class="feature-list">
+      <li>演讲片段单词/语句用法解读</li>
+      <li>选择题测试（词义、语法）</li>
+      <li>中→英 / 英→中 翻译练习</li>
+      <li>听力选择题</li>
+      <li>练读进度追踪</li>
+    </ul>
+    <div style="margin-top:20px;background:var(--card);border-radius:10px;padding:14px;box-shadow:var(--shadow);width:100%;text-align:left">
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px">📌 当前进度</div>
+      <textarea class="notes-box" style="min-height:48px" placeholder="记录练读进度、遇到的难点..." oninput="lsRaw('wb_notes_en_${TODAY}',this.value)">${lsRaw(`wb_notes_en_${TODAY}`)}</textarea>
+    </div>
+  </div>`;
+  document.getElementById('contentArea').innerHTML = html;
+}
+
+// ============ Tab4: Python学习 ============
+function getPyTasks(){
+  let tasks = ls(`wb_py_${TODAY}`)||[];
+  tasks.forEach(migrateTaskState);
+  return tasks;
+}
+function savePyTasks(tasks){
+  ls(`wb_py_${TODAY}`,tasks);
+}
+function renderPy(){
+  let tasks = getPyTasks();
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div style="font-size:17px;font-weight:700">Python 学习</div>
+    <button class="add-btn" onclick="showAddPyModal()" title="添加任务">+</button>
+  </div>`;
+  if(tasks.length===0){
+    html += `<div class="empty-state"><div class="icon">🐍</div><p>暂无任务，点击 + 添加</p></div>`;
+  } else {
+    tasks.forEach((t,i)=>{
+      let chk = t.state===2?'checked':t.state===1?'incomplete':'';
+      let itemClass = t.state===1?'incomplete-state':'';
+      html += `<div class="task-item ${itemClass}" id="pyItem${i}">
+        <div class="delete-zone" onclick="deletePy(${i})">删除</div>
+        <div class="task-content">
+          <div class="task-checkbox ${chk}" onclick="togglePy(${i})"></div>
+          <div class="task-text ${t.state===2?'done':''} ${t.state===1?'incomplete':''}" onclick="editPyText(${i},this)">${t.text}</div>
+        </div>
+      </div>`;
+    });
+  }
+  let notes = lsRaw(`wb_notes_py_${TODAY}`);
+  html += `<div class="notes-section"><label>📝 学习备注</label>
+    <textarea class="notes-box" oninput="lsRaw('wb_notes_py_${TODAY}',this.value)" placeholder="学习心得、踩坑记录...">${notes}</textarea></div>`;
+  document.getElementById('contentArea').innerHTML = html;
+  tasks.forEach((_,i)=>initSwipe(document.getElementById('pyItem'+i),()=>deletePy(i)));
+}
+function togglePy(i){
+  let tasks=getPyTasks();tasks[i].state=cycleState(tasks[i].state);savePyTasks(tasks);renderPy();
+}
+function deletePy(i){
+  let tasks=getPyTasks();tasks.splice(i,1);savePyTasks(tasks);renderPy();
+}
+function editPyText(i,el){
+  let tasks=getPyTasks();let cur=tasks[i].text;
+  el.innerHTML=`<input type="text" value="${cur}" style="width:100%;border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:14px;font-family:inherit;outline:none" onblur="finishEditPy(${i},this)" onkeydown="if(event.key==='Enter')this.blur()">`;
+  el.querySelector('input').focus();
+}
+function finishEditPy(i,input){
+  let tasks=getPyTasks();tasks[i].text=input.value.trim()||tasks[i].text;savePyTasks(tasks);renderPy();
+}
+function showAddPyModal(){
+  document.getElementById('modalTitle').textContent='添加 Python 任务';
+  document.getElementById('taskInput').value='';
+  document.getElementById('modal').classList.add('show');
+  setTimeout(()=>document.getElementById('taskInput').focus(),100);
+}
+function addPyFromModal(){
+  let text=document.getElementById('taskInput').value.trim();
+  if(!text)return;
+  let tasks=getPyTasks();
+  tasks.push({text,state:0});
+  savePyTasks(tasks);renderPy();
+  document.getElementById('modal').classList.remove('show');
+}
+
+// ============ Tab5: 阅读小计 ============
+function renderRead(){
+  let entries = ls('wb_read_entries')||[];
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <div style="font-size:17px;font-weight:700">阅读小计</div>
+    <button class="add-btn" onclick="showAddReadModal()" title="添加阅读记录">+</button>
+  </div>`;
+  if(entries.length===0){
+    html += `<div class="empty-state"><div class="icon">📖</div><p>暂无记录，点击 + 添加</p></div>`;
+  } else {
+    entries.forEach((e,i)=>{
+      html += `<div class="task-item" style="margin-bottom:10px">
+        <div class="task-content" style="flex-direction:column;align-items:stretch">
+          <div style="font-size:13px;color:var(--gray);margin-bottom:2px">${e.date}</div>
+          <div style="font-size:14px;font-weight:500;margin-bottom:4px">${e.title||'阅读摘录'}</div>
+          <div style="font-size:13px;line-height:1.6;background:#f5f5f7;border-radius:6px;padding:8px;margin-bottom:4px">${e.content}</div>
+          <textarea class="task-note-input" rows="2" placeholder="我的感悟/心得..." oninput="saveReadNote(${i},this.value)">${e.note||''}</textarea>
+        </div>
+      </div>`;
+    });
+  }
+  let notes = lsRaw(`wb_notes_read_${TODAY}`);
+  html += `<div class="notes-section"><label>📝 阅读备注</label>
+    <textarea class="notes-box" oninput="lsRaw('wb_notes_read_${TODAY}',this.value)" placeholder="阅读相关备注...">${notes}</textarea></div>`;
+  document.getElementById('contentArea').innerHTML = html;
+}
+
+function showAddReadModal(){
+  document.getElementById('modalTitle').textContent='添加阅读摘录';
+  document.getElementById('taskInput').placeholder='输入摘录内容或拍照后粘贴文字...';
+  document.getElementById('taskInput').value='';
+  document.getElementById('modal').classList.add('show');
+  setTimeout(()=>document.getElementById('taskInput').focus(),100);
+}
+function addReadFromModal(){
+  let text=document.getElementById('taskInput').value.trim();
+  if(!text)return;
+  let entries=ls('wb_read_entries')||[];
+  entries.push({date:TODAY,title:'',content:text,note:''});
+  ls('wb_read_entries',entries);renderRead();
+  document.getElementById('modal').classList.remove('show');
+  document.getElementById('taskInput').placeholder='输入任务内容...';
+}
+function saveReadNote(i,val){
+  let entries=ls('wb_read_entries')||[];entries[i].note=val;ls('wb_read_entries',entries);
+}
+
+// ============ 通用 ============
+function renderSidebar(){
+  let sb = document.getElementById('sidebar');
+  sb.innerHTML = '';
+  TABS.forEach(tab=>{
+    let btn=document.createElement('button');
+    btn.className='tab-btn'+(tab.id===activeTab?' active':'');
+    btn.innerHTML=`<span class="tab-icon">${tab.icon}</span><span class="tab-label">${tab.label}</span>`;
+    btn.addEventListener('click',()=>{activeTab=tab.id;renderSidebar();renderActiveTab();});
+    sb.appendChild(btn);
+  });
+}
+
+function renderActiveTab(){
+  if(activeTab==='plan'){calcDailyRate();renderPlan();}
+  else if(activeTab==='work') renderWork();
+  else if(activeTab==='en') renderEn();
+  else if(activeTab==='py') renderPy();
+  else if(activeTab==='read') renderRead();
+}
+
+// 滑动删除通用
+function initSwipe(item,deleteFn){
+  if(!item)return;
+  let startX=0,currentX=0,isSwiping=false;
+  const threshold=40;
+  const maxSwipe=56;
+  const content=item.querySelector('.task-content');
+  function onStart(x){startX=x;currentX=0;isSwiping=true;item.classList.add('swiping')}
+  function onMove(x){if(!isSwiping)return;currentX=startX-x;if(currentX<0)currentX=0;if(currentX>maxSwipe)currentX=maxSwipe;content.style.transform=`translateX(-${currentX}px)`}
+  function onEnd(){isSwiping=false;item.classList.remove('swiping');if(currentX>=threshold){content.style.transform=`translateX(-${maxSwipe}px)`;content.style.transition='transform .2s';setTimeout(()=>{content.style.transition=''},200)}else{content.style.transform='';content.style.transition='transform .2s';setTimeout(()=>{content.style.transition=''},200)}}
+  item.addEventListener('touchstart',e=>{if(e.target.classList.contains('task-checkbox'))return;onStart(e.touches[0].clientX)}, {passive:true});
+  item.addEventListener('touchmove',e=>onMove(e.touches[0].clientX),{passive:true});
+  item.addEventListener('touchend',onEnd);
+  item.addEventListener('mousedown',e=>{if(e.target.classList.contains('task-checkbox')||e.target.classList.contains('task-note-input')||e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;onStart(e.clientX);const mh=ev=>onMove(ev.clientX);const eh=()=>{onEnd();window.removeEventListener('mousemove',mh);window.removeEventListener('mouseup',eh)};window.addEventListener('mousemove',mh);window.addEventListener('mouseup',eh)});
+}
+
+// 弹窗通用
+document.getElementById('cancelBtn').addEventListener('click',()=>document.getElementById('modal').classList.remove('show'));
+document.getElementById('modal').addEventListener('click',e=>{if(e.target===document.getElementById('modal'))document.getElementById('modal').classList.remove('show')});
+document.getElementById('taskInput').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){
+    if(activeTab==='work') addWorkFromModal();
+    else if(activeTab==='read') addReadFromModal();
+    else if(activeTab==='py') addPyFromModal();
+  }
+  if(e.key==='Escape') document.getElementById('modal').classList.remove('show');
+});
+document.getElementById('confirmBtn').addEventListener('click',()=>{
+  if(activeTab==='work') addWorkFromModal();
+  else if(activeTab==='read') addReadFromModal();
+  else if(activeTab==='py') addPyFromModal();
+});
+document.getElementById('statsOverlay').addEventListener('click',e=>{if(e.target===document.getElementById('statsOverlay'))document.getElementById('statsOverlay').classList.remove('show')});
+
+// === 启动 ===
+syncInit().then(()=>{
+  renderSidebar();
+  renderActiveTab();
+});
+</script>
+<script>
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(function(){}); }
+</script>
+</body>
+</html>
