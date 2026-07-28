@@ -170,6 +170,32 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
   .tab-btn .tab-icon{font-size:16px}
   .content-area{padding:10px 12px 14px}
 }
+
+/* 英语学习 Tab */
+.en-subnav{display:flex;gap:6px;margin-bottom:14px}
+.en-subnav button{flex:1;padding:9px 4px;border:1px solid var(--border);background:var(--card);color:var(--gray);border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}
+.en-subnav button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.en-head{font-size:14px;color:var(--gray);margin-bottom:12px;line-height:1.6}
+.en-head a{color:var(--accent);text-decoration:none}
+.en-lesson{background:var(--card);border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:var(--shadow);animation:slideUp .25s}
+.en-lesson .en-sentence{font-size:15px;font-weight:600;line-height:1.65;color:var(--text);margin-bottom:6px}
+.en-lesson .en-zh{font-size:13px;color:var(--gray);line-height:1.65;margin-bottom:10px}
+.en-lesson .sec-title{font-size:12px;font-weight:700;color:var(--accent);margin:12px 0 6px;letter-spacing:.5px}
+.en-word{border-left:3px solid var(--accent);padding:6px 10px;background:#f7f3ff;border-radius:0 8px 8px 0;margin-bottom:8px}
+.en-word .w{font-weight:700;color:var(--text);font-size:13px}
+.en-word .m{font-size:12.5px;color:var(--text);line-height:1.5}
+.en-word .ex{font-size:12px;color:var(--gray);line-height:1.5;margin-top:2px;font-style:italic}
+.en-grammar{font-size:13px;line-height:1.7;background:#fff7f3;border-radius:8px;padding:10px;color:var(--text)}
+.en-test-q{background:var(--card);border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:var(--shadow);animation:slideUp .25s}
+.en-test-q .q{font-size:14px;font-weight:600;line-height:1.65;margin-bottom:10px}
+.en-opt{display:block;width:100%;text-align:left;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:var(--card);font-size:13px;cursor:pointer;margin-bottom:8px;transition:all .15s;color:var(--text)}
+.en-opt:hover{border-color:var(--accent)}
+.en-opt.correct{background:#e3f7e8;border-color:#37a95a;color:#1d7a3a;font-weight:600}
+.en-opt.wrong{background:#fde8e8;border-color:#e0584e;color:#b22;font-weight:600}
+.en-opt:disabled{cursor:default}
+.en-explain{font-size:12.5px;line-height:1.65;background:#f0f4ff;border-radius:8px;padding:9px;margin-top:4px;color:var(--text)}
+.en-score{font-size:13px;font-weight:600;color:var(--accent);margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+.en-empty{text-align:center;color:var(--gray);font-size:13px;padding:30px}
 </style>
 </head>
 <body>
@@ -976,24 +1002,179 @@ function addWorkSub(i){
 }
 
 // ============ Tab3: 英语学习 ============
+// 语料来源：Taylor Swift 纽约大学 2022 毕业演讲
+let enSubview = 'explain';
+const EN_LESSONS = [
+  {
+    id:'en1',
+    en:`Not a single one of us here today has done it alone.`,
+    zh:`今天在座的我们，没有一个人是独自走到今天的。`,
+    words:[
+      {w:'Not a single one', m:'没有一个（强调完全否定，语气强于 none）', ex:`Not a single one of the applicants was qualified. 应聘者没有一个是合格的。`},
+      {w:'has done it alone', m:'独自完成它（it 指“毕业 / 走到今天”）', ex:`She did it all alone. 她全靠自己完成的。`}
+    ],
+    grammar:`“Not a single + 单数名词”把否定词前置，比 none 语气更强，强调“零例外”。注意主谓一致用单数 has。`,
+    test:{q:`“Not a single one of us...” 中 not a single one 的语法作用是？`,
+      options:['表部分否定，还有一些人','表完全否定、强调无一例外','表一般疑问','表委婉推测'],
+      answer:1,
+      explain:`Not a single one 为否定前置 + 单数名词，表示“一个都没有”，语气比 none 更强。`}
+  },
+  {
+    id:'en2',
+    en:`As for me, I'm 90% sure the main reason I'm here is because I have a song called '22.'`,
+    zh:`至于我，我有 90% 的把握，我站在这里的主要原因是因为我写了一首叫《22》的歌。`,
+    words:[
+      {w:'As for me', m:'至于我 / 说到我（转换话题焦点）', ex:`As for the budget, we'll discuss it later. 至于预算，我们稍后讨论。`},
+      {w:'90% sure', m:'90% 确定（sure 后接 that 从句或 of sth）', ex:`I'm sure (that) he will come. 我确定他会来。`},
+      {w:`the main reason ... is because ...`, m:'……的主要原因是……', ex:`The reason I'm late is because of traffic. 我迟到的原因是堵车。`}
+    ],
+    grammar:`as for + 名词 是话语标记语，用于切换话题、把注意力引到某人/某事；be sure (that)... 后接宾语从句。口语中 “the reason is because...” 虽常被语法书批评，但在演讲等口语场景很常见。`,
+    test:{q:`“As for me” 在句中的作用是？`,
+      options:['表示原因','转换话题、把焦点引到自己身上','表示转折','表示举例'],
+      answer:1,
+      explain:`as for 用来切换话题焦点，相当于“至于 / 说到”。`}
+  },
+  {
+    id:'en3',
+    en:`We are each a patchwork quilt of those who have loved us, those who have believed in our futures, those who showed us empathy and kindness...`,
+    zh:`我们每个人都像一床拼布被子，由那些爱过我们的人、相信我们未来的人、向我们展现同理心与善意的人……拼凑而成。`,
+    words:[
+      {w:'patchwork quilt', m:'拼布被子（喻：由许多碎片拼成、各不相同却完整）', ex:`Her life is a patchwork quilt of different cultures. 她的生活由不同文化拼凑而成。`},
+      {w:'those who have loved us', m:'那些爱过我们的人（those who + 动词，指代“……的人”）', ex:`Those who wait patiently will be rewarded. 耐心等待的人会得到回报。`},
+      {w:'empathy', m:'/ˈempəθi/ n. 同理心、共情', ex:`He listened with empathy. 他带着同理心倾听。`}
+    ],
+    grammar:`排比结构 “those who..., those who..., those who...” 三个定语从句并列，增强语势与节奏感；patchwork quilt 是隐喻，把“人由他人影响拼凑而成”具象化。`,
+    test:{q:`“those who have loved us” 里 those who 的意思是？`,
+      options:['那些事','那些爱过我们的人','那些地方','那些书'],
+      answer:1,
+      explain:`those (who + 从句) 是固定用法，指代“做……的那些人”。`}
+  },
+  {
+    id:'en4',
+    en:`I never got to have the normal college experience, per se.`,
+    zh:`我从来没能体验过所谓“正常”的大学生活，严格来说（本身）没有。`,
+    words:[
+      {w:'got to have', m:'得以 / 有机会拥有（get to do = have the chance to）', ex:`I got to meet my idol. 我得以见到了我的偶像。`},
+      {w:'per se', m:'/ˌpɜːr ˈseɪ/ adv. 本身、本质上（拉丁语）', ex:`It's not a bad idea per se. 这个主意本身并不差。`}
+    ],
+    grammar:`get to do 表示“得到机会去做”，含幸运 / 如愿的意味；per se 作状语，限制范围“就本身而言”，常用来减弱或精确化前面的表述。`,
+    test:{q:`“per se” 在句中的意思是？`,
+      options:['例如','本身、本质上','除此之外','然而'],
+      answer:1,
+      explain:`per se 是拉丁语外来词，作状语表示“本身 / 就其本身而言”。`}
+  },
+  {
+    id:'en5',
+    en:`Scary news is: You're on your own now. Cool news is: You're on your own now.`,
+    zh:`吓人的消息是：现在你只能靠自己了。酷的消息是：现在你只能靠自己了。`,
+    words:[
+      {w:'Scary news / Cool news', m:'吓人的消息 / 酷的消息（用 news 拟人化，制造对比反差）', ex:`The good news is, we made it. 好消息是，我们做到了。`},
+      {w:'on your own', m:'独自、靠自己（= by yourself）', ex:`You should learn to stand on your own. 你要学会自立。`}
+    ],
+    grammar:`同句重复 “You're on your own now”，前接 Scary / Cool 两个相反评价，形成反差修辞——同一件事既是挑战也是自由，体现演讲核心：你自由了，但也得自己扛。`,
+    test:{q:`“on your own” 的意思是？`,
+      options:['靠自己、独自','和别人一起','在户外','马上'],
+      answer:0,
+      explain:`on one's own = by oneself，意为“独自 / 靠自己”。`}
+  },
+  {
+    id:'en6',
+    en:`As long as we are fortunate enough to be breathing, we will breathe in, breathe through, breathe deep, breathe out.`,
+    zh:`只要我们还有幸能呼吸，我们就会吸气、挺过去、深吸一口气、再呼出来。`,
+    words:[
+      {w:'As long as', m:'只要（引导条件状语从句）', ex:`As long as you try, it's fine. 只要你试了就好。`},
+      {w:'fortunate enough to...', m:'足够幸运得以……（enough to do 结构）', ex:`He was lucky enough to escape. 他够幸运逃过一劫。`},
+      {w:'breathe in / through / deep / out', m:'吸气 / 挺过去 / 深吸气 / 呼出（四个 breathe 短语排比，把“熬过难关”具象为呼吸动作）', ex:`Breathe in, then breathe out. 吸气，然后呼气。`}
+    ],
+    grammar:`as long as 引导条件，相当于 provided that / only if；adj. + enough to do 表示“足够……去做”；四个 breathe 短语构成排比(parallelism)，节奏感强，把抽象的情绪调节化为具体的呼吸步骤。`,
+    test:{q:`“As long as” 引导的是哪种从句？`,
+      options:['时间状语从句','条件状语从句（只要）','定语从句','宾语从句'],
+      answer:1,
+      explain:`as long as 意为“只要”，引导条件状语从句，相当于 provided that。`}
+  }
+];
+
 function renderEn(){
-  let html = `<div class="placeholder">
-    <div class="icon">🇬🇧</div>
-    <h2>英语学习</h2>
-    <p>正在 Bilibili 练读 Taylor Swift 纽约大学毕业演讲，练读完成后将解锁以下功能：</p>
-    <ul class="feature-list">
-      <li>演讲片段单词/语句用法解读</li>
-      <li>选择题测试（词义、语法）</li>
-      <li>中→英 / 英→中 翻译练习</li>
-      <li>听力选择题</li>
-      <li>练读进度追踪</li>
-    </ul>
-    <div style="margin-top:20px;background:var(--card);border-radius:10px;padding:14px;box-shadow:var(--shadow);width:100%;text-align:left">
-      <div style="font-size:14px;font-weight:600;margin-bottom:8px">📌 当前进度</div>
-      <textarea class="notes-box" style="min-height:48px" placeholder="记录练读进度、遇到的难点..." oninput="lsRaw('wb_notes_en_${TODAY}',this.value)">${lsRaw(`wb_notes_en_${TODAY}`)}</textarea>
+  let nav = `<div class="en-subnav">
+    <button class="${enSubview==='read'?'active':''}" onclick="enSubview='read';renderEn()">练读进度</button>
+    <button class="${enSubview==='explain'?'active':''}" onclick="enSubview='explain';renderEn()">语句拆分讲解</button>
+    <button class="${enSubview==='test'?'active':''}" onclick="enSubview='test';renderEn()">语句拆分测试</button>
+  </div>`;
+  let body = '';
+  if(enSubview==='read') body = renderEnRead();
+  else if(enSubview==='explain') body = renderEnExplain();
+  else if(enSubview==='test') body = renderEnTest();
+  document.getElementById('contentArea').innerHTML = nav + body;
+}
+
+function renderEnRead(){
+  return `<div class="placeholder" style="padding-top:8px">
+    <div class="icon" style="font-size:40px">🇬🇧</div>
+    <h2>练读进度</h2>
+    <p>正在练读 Taylor Swift 纽约大学毕业演讲，记录你的进度与难点：</p>
+    <div style="margin-top:16px;background:var(--card);border-radius:10px;padding:14px;box-shadow:var(--shadow);width:100%;text-align:left">
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px">📌 今日练读笔记</div>
+      <textarea class="notes-box" style="min-height:60px" placeholder="记录练读进度、遇到的难点、发音注意点..." oninput="lsRaw('wb_notes_en_${TODAY}',this.value)">${lsRaw(`wb_notes_en_${TODAY}`)}</textarea>
     </div>
   </div>`;
-  document.getElementById('contentArea').innerHTML = html;
+}
+
+function renderEnExplain(){
+  let head = `<div class="en-head">📺 语料来自 <a href="https://b23.tv/jSeAoIV" target="_blank" rel="noopener">Taylor Swift 纽约大学毕业演讲（Bilibili）</a>，以下为精选语句拆解：</div>`;
+  let cards = EN_LESSONS.map(les=>{
+    let words = les.words.map(w=>`<div class="en-word"><div class="w">${w.w}</div><div class="m">${w.m}</div><div class="ex">${w.ex}</div></div>`).join('');
+    return `<div class="en-lesson">
+      <div class="en-sentence">${les.en}</div>
+      <div class="en-zh">${les.zh}</div>
+      <div class="sec-title">🔤 单词 / 短语拆解</div>
+      ${words}
+      <div class="sec-title">💡 语法 / 用法点拨</div>
+      <div class="en-grammar">${les.grammar}</div>
+    </div>`;
+  }).join('');
+  return head + cards;
+}
+
+function getEnTestState(){
+  try{ return JSON.parse(localStorage.getItem('wb_en_test')||'{}'); }catch{ return {}; }
+}
+function renderEnTest(){
+  let state = getEnTestState();
+  let total = EN_LESSONS.length;
+  let done = 0, correct = 0;
+  EN_LESSONS.forEach((les,i)=>{ if(state[i]!=null){ done++; if(state[i]===les.test.answer) correct++; } });
+  let scoreHtml = `<div class="en-score"><span>已答 ${done}/${total} ｜ 正确 ${correct}</span><button class="sync-btn" onclick="resetEnTest()">重置</button></div>`;
+  let cards = EN_LESSONS.map((les,i)=>{
+    let chosen = state[i];
+    let opts = les.test.options.map((o,oi)=>{
+      let cls='en-opt';
+      let dis='';
+      if(chosen!=null){
+        dis='disabled';
+        if(oi===les.test.answer) cls+=' correct';
+        else if(oi===chosen) cls+=' wrong';
+      }
+      return `<button class="${cls}" ${dis} onclick="selectEnTest(${i},${oi})">${o}</button>`;
+    }).join('');
+    let exp = (chosen!=null) ? `<div class="en-explain">✅ 解析：${les.test.explain}</div>` : '';
+    return `<div class="en-test-q">
+      <div class="q">${i+1}. ${les.test.q}</div>
+      ${opts}
+      ${exp}
+    </div>`;
+  }).join('');
+  if(total===0) return `<div class="en-empty">暂无测试题</div>`;
+  return scoreHtml + cards;
+}
+function selectEnTest(i, oi){
+  let state = getEnTestState();
+  state[i] = oi;
+  localStorage.setItem('wb_en_test', JSON.stringify(state));
+  renderEn();
+}
+function resetEnTest(){
+  localStorage.removeItem('wb_en_test');
+  renderEn();
 }
 
 // ============ Tab4: Python学习 ============
