@@ -176,7 +176,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
 
 <div class="topbar">
   <div><h1>暴躁汤的工作台</h1><div class="date" id="dateDisplay"></div></div>
-  <div class="daily-rate" id="dailyRate">今日 0%</div>
 </div>
 <div class="syncbar" id="syncbar" style="display:none">
   <span class="sync-status" id="syncStatus">☁ 未同步</span>
@@ -441,13 +440,11 @@ function getWeightHistory(){
 function calcDailyRate(){
   let h = getPlanToday();
   let ht = getHealthToday();
-  let today = h[TODAY];
-  let done = today.filter(t=>t.state===2).length;
-  if(ht[TODAY].noSnack) done++;
-  if(ht[TODAY].intermittent) done++;
-  let pct = Math.round(done/8*100);
-  document.getElementById('dailyRate').textContent = `今日 ${pct}%`;
-  document.getElementById('dailyRate').style.background = pct>=80?'#e0f5e0':pct>=50?'#fff3e0':'#f0f0f2';
+  let today = h[TODAY]||[];
+  let done = today.filter(t=>t&&t.state===2).length;
+  if(ht[TODAY] && ht[TODAY].noSnack) done++;
+  if(ht[TODAY] && ht[TODAY].intermittent) done++;
+  return Math.round(done/8*100);
 }
 
 // 渲染重启计划
@@ -456,7 +453,13 @@ function renderPlan(){
   let ht = getHealthToday();
   let today = h[TODAY];
   let wh = getWeightHistory();
-  let html = '';
+  let pct = calcDailyRate();
+  let rateColor = pct>=80?'#4caf50':pct>=50?'#ff9800':'#9e9e9e';
+  let rateBg = pct>=80?'#e8f5e9':pct>=50?'#fff3e0':'#f5f5f5';
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div style="font-size:17px;font-weight:700">🔥 重启计划</div>
+    <div style="font-size:13px;font-weight:600;padding:4px 10px;border-radius:12px;background:${rateBg};color:${rateColor}">今日 ${pct}%</div>
+  </div>`;
 
   // 0-5: 普通任务
   for(let i=0;i<6;i++){
@@ -557,7 +560,7 @@ function togglePlan(i){
   t.state = (t.state===undefined?0:t.state)+1;
   if(t.state>2) t.state=0;
   ls('wb_plan_history', h);
-  calcDailyRate(); renderPlan();
+  renderPlan();
 }
 function savePlanNote(i,val){
   let h = getPlanToday();
@@ -569,7 +572,7 @@ function toggleHealth(field){
   let ht = getHealthToday();
   ht[TODAY][field] = !ht[TODAY][field];
   ls('wb_health_history', ht);
-  calcDailyRate(); renderPlan();
+  renderPlan();
 }
 function checkHealthAll(){
   let ht = getHealthToday();
@@ -578,7 +581,7 @@ function checkHealthAll(){
   h.noSnack = !allDone;
   h.intermittent = !allDone;
   ls('wb_health_history', ht);
-  calcDailyRate(); renderPlan();
+  renderPlan();
 }
 function saveWeight(val){
   let ht = getHealthToday();
@@ -1034,22 +1037,92 @@ function addPyFromModal(){
 }
 
 // ============ Tab5: 阅读小计 ============
+const READ_TAGS = [
+  {key:'quote', label:'金句', color:'#ff9800'},
+  {key:'idea', label:'观点', color:'#2196f3'},
+  {key:'method', label:'方法', color:'#4caf50'},
+  {key:'story', label:'故事', color:'#9c27b0'},
+  {key:'emotion', label:'情绪', color:'#e91e63'}
+];
+const READ_PROMPTS = [
+  "这本书/文章最颠覆你认知的一句话是什么？",
+  "如果只能记住一个点，你会选哪个？为什么？",
+  "作者解决了一个什么问题？他的思路和你原本想的有什么不同？",
+  "读完后，你最想立刻实践的一个小行动是什么？",
+  "这段内容让你联想到自己哪段经历？",
+  "如果给这段内容写一条朋友圈，你会怎么写？",
+  "这里提到的方法，能套用到你当前的工作/生活里吗？",
+  "有哪些关键词/概念是你以前没注意过的？",
+  "如果用一个词概括今天的阅读，会是什么？",
+  "这段内容和你最近在学/在做的某件事有什么连接？"
+];
+let _selectedReadTag = '';
+
 function renderRead(){
   let entries = ls('wb_read_entries')||[];
   let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-    <div style="font-size:17px;font-weight:700">阅读小计</div>
-    <button class="add-btn" onclick="showAddReadModal()" title="添加阅读记录">+</button>
+    <div style="font-size:17px;font-weight:700">📖 阅读小计</div>
+    <button class="add-btn" onclick="toggleReadForm()" title="添加阅读记录">+</button>
   </div>`;
+
+  // 添加表单
+  html += `<div id="readForm" style="display:none;margin-bottom:14px;background:var(--card);border-radius:12px;padding:12px;border:1px solid var(--border);box-shadow:var(--shadow)">
+    <div style="font-size:14px;font-weight:600;margin-bottom:10px;color:var(--text)">添加阅读记录</div>
+    <input type="text" id="readTitle" placeholder="书名 / 文章标题" style="width:100%;margin-bottom:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;box-sizing:border-box">
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <input type="text" id="readAuthor" placeholder="作者（可选）" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+      <input type="text" id="readProgress" placeholder="进度（如 P120 / 30%）" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+    </div>
+    <div style="font-size:12px;color:var(--gray);margin-bottom:6px">标签（选一项）</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+      ${READ_TAGS.map(t=>{
+        let active = _selectedReadTag===t.key;
+        return `<button type="button" class="read-tag-btn${active?' active':''}" data-tag="${t.key}" onclick="selectReadTag('${t.key}')" style="padding:4px 10px;border-radius:12px;border:1px solid ${active?t.color:'#ddd'};background:${active?t.color+'15':'#fff'};color:${active?t.color:'#555'};font-size:12px;cursor:pointer;font-family:inherit">${t.label}</button>`;
+      }).join('')}
+    </div>
+    <textarea id="readContent" rows="2" placeholder="摘录原文 / 核心内容..." style="width:100%;margin-bottom:8px;border-radius:8px;border:1px solid var(--border);padding:8px;font-family:inherit;font-size:13px;box-sizing:border-box;resize:vertical"></textarea>
+    <textarea id="readInsight" rows="2" placeholder="我的感悟 / 思考..." style="width:100%;margin-bottom:8px;border-radius:8px;border:1px solid var(--border);padding:8px;font-family:inherit;font-size:13px;box-sizing:border-box;resize:vertical"></textarea>
+    <textarea id="readAction" rows="2" placeholder="行动 / 应用计划..." style="width:100%;margin-bottom:10px;border-radius:8px;border:1px solid var(--border);padding:8px;font-family:inherit;font-size:13px;box-sizing:border-box;resize:vertical"></textarea>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-cancel" onclick="toggleReadForm()">取消</button>
+      <button class="btn-confirm" onclick="saveReadEntry()">保存</button>
+    </div>
+  </div>`;
+
+  // 灵感卡片
+  let seed = TODAY.split('-').reduce((a,b)=>a+parseInt(b),0);
+  let shuffled = READ_PROMPTS.map((p,i)=>({p,i})).sort((a,b)=>{
+    let x = Math.sin(seed+a.i)*10000, y = Math.sin(seed+b.i)*10000;
+    return (x-Math.floor(x))-(y-Math.floor(y));
+  });
+  let prompts = shuffled.slice(0,2).map(o=>o.p);
+  html += `<div style="background:#fff7ed;border-radius:10px;padding:10px 12px;margin-bottom:12px;border-left:3px solid #ff9800">
+    <div style="font-size:12px;font-weight:600;color:#e65100;margin-bottom:4px">💡 今日灵感</div>
+    ${prompts.map(p=>`<div style="font-size:12px;color:#5d4037;line-height:1.5;margin-bottom:4px">• ${p}</div>`).join('')}
+  </div>`;
+
+  // 记录列表
   if(entries.length===0){
-    html += `<div class="empty-state"><div class="icon">📖</div><p>暂无记录，点击 + 添加</p></div>`;
+    html += `<div class="empty-state"><div class="icon">📖</div><p>暂无记录，点击 + 添加第一条</p></div>`;
   } else {
     entries.forEach((e,i)=>{
+      let tag = READ_TAGS.find(t=>t.key===e.tag);
+      let tagHtml = tag ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:${tag.color}15;color:${tag.color};font-size:11px;font-weight:600;margin-right:6px">${tag.label}</span>` : '';
       html += `<div class="task-item" style="margin-bottom:10px">
         <div class="task-content" style="flex-direction:column;align-items:stretch">
-          <div style="font-size:13px;color:var(--gray);margin-bottom:2px">${e.date}</div>
-          <div style="font-size:14px;font-weight:500;margin-bottom:4px">${e.title||'阅读摘录'}</div>
-          <div style="font-size:13px;line-height:1.6;background:#f5f5f7;border-radius:6px;padding:8px;margin-bottom:4px">${e.content}</div>
-          <textarea class="task-note-input" rows="2" placeholder="我的感悟/心得..." oninput="saveReadNote(${i},this.value)">${e.note||''}</textarea>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <div style="font-size:12px;color:var(--gray)">${e.date}${e.progress?' · '+e.progress:''}</div>
+            <button onclick="deleteReadEntry(${i})" style="background:none;border:none;color:#999;font-size:18px;line-height:1;padding:0 4px;cursor:pointer">×</button>
+          </div>
+          <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:4px">
+            ${tagHtml}
+            <div style="font-size:14px;font-weight:600">${e.title||'阅读摘录'}</div>
+            ${e.author?`<div style="font-size:12px;color:var(--gray)">by ${e.author}</div>`:''}
+          </div>
+          ${e.content?`<div style="font-size:13px;line-height:1.6;background:#f5f5f7;border-radius:6px;padding:8px;margin-bottom:6px;color:var(--text)">${e.content}</div>`:''}
+          ${e.insight?`<div style="font-size:12px;color:#555;line-height:1.5;margin-bottom:4px"><b>感悟：</b>${e.insight}</div>`:''}
+          ${e.action?`<div style="font-size:12px;color:#2e7d32;line-height:1.5;margin-bottom:4px"><b>行动：</b>${e.action}</div>`:''}
+          ${e.note?`<div style="font-size:12px;color:#555;line-height:1.5;margin-bottom:4px"><b>备注：</b>${e.note}</div>`:''}
         </div>
       </div>`;
     });
@@ -1060,24 +1133,69 @@ function renderRead(){
   document.getElementById('contentArea').innerHTML = html;
 }
 
-function showAddReadModal(){
-  document.getElementById('modalTitle').textContent='添加阅读摘录';
-  document.getElementById('taskInput').placeholder='输入摘录内容或拍照后粘贴文字...';
-  document.getElementById('taskInput').value='';
-  document.getElementById('modal').classList.add('show');
-  setTimeout(()=>document.getElementById('taskInput').focus(),100);
+function toggleReadForm(){
+  let f = document.getElementById('readForm');
+  if(!f) return;
+  let showing = f.style.display !== 'none';
+  if(showing){
+    f.style.display = 'none';
+    return;
+  }
+  _selectedReadTag = '';
+  ['readTitle','readAuthor','readProgress','readContent','readInsight','readAction'].forEach(id=>{
+    let el = document.getElementById(id);
+    if(el) el.value = '';
+  });
+  document.querySelectorAll('.read-tag-btn').forEach(btn=>{
+    btn.style.borderColor = '#ddd';
+    btn.style.background = '#fff';
+    btn.style.color = '#555';
+  });
+  f.style.display = 'block';
+  setTimeout(()=>document.getElementById('readTitle')?.focus(),50);
 }
-function addReadFromModal(){
-  let text=document.getElementById('taskInput').value.trim();
-  if(!text)return;
-  let entries=ls('wb_read_entries')||[];
-  entries.push({date:TODAY,title:'',content:text,note:''});
-  ls('wb_read_entries',entries);renderRead();
-  document.getElementById('modal').classList.remove('show');
-  document.getElementById('taskInput').placeholder='输入任务内容...';
+function selectReadTag(key){
+  _selectedReadTag = _selectedReadTag===key?'':key;
+  document.querySelectorAll('.read-tag-btn').forEach(btn=>{
+    let t = READ_TAGS.find(x=>x.key===btn.dataset.tag);
+    let active = btn.dataset.tag===_selectedReadTag;
+    btn.style.borderColor = active?t.color:'#ddd';
+    btn.style.background = active?t.color+'15':'#fff';
+    btn.style.color = active?t.color:'#555';
+  });
+}
+function saveReadEntry(){
+  let title = (document.getElementById('readTitle').value||'').trim();
+  let content = (document.getElementById('readContent').value||'').trim();
+  if(!title && !content){
+    alert('请至少填写书名/标题或摘录内容');
+    return;
+  }
+  let entries = ls('wb_read_entries')||[];
+  entries.unshift({
+    date:TODAY,
+    title:title,
+    author:(document.getElementById('readAuthor').value||'').trim(),
+    progress:(document.getElementById('readProgress').value||'').trim(),
+    tag:_selectedReadTag,
+    content:content,
+    insight:(document.getElementById('readInsight').value||'').trim(),
+    action:(document.getElementById('readAction').value||'').trim(),
+    note:''
+  });
+  ls('wb_read_entries',entries);
+  _selectedReadTag = '';
+  renderRead();
+}
+function deleteReadEntry(i){
+  let entries = ls('wb_read_entries')||[];
+  if(confirm('确定删除这条阅读记录吗？')){
+    entries.splice(i,1);
+    ls('wb_read_entries',entries);renderRead();
+  }
 }
 function saveReadNote(i,val){
-  let entries=ls('wb_read_entries')||[];entries[i].note=val;ls('wb_read_entries',entries);
+  let entries=ls('wb_read_entries')||[];if(entries[i]){entries[i].note=val;ls('wb_read_entries',entries);}
 }
 
 // ============ 通用 ============
@@ -1094,7 +1212,7 @@ function renderSidebar(){
 }
 
 function renderActiveTab(){
-  if(activeTab==='plan'){calcDailyRate();renderPlan();}
+  if(activeTab==='plan') renderPlan();
   else if(activeTab==='work') renderWork();
   else if(activeTab==='en') renderEn();
   else if(activeTab==='py') renderPy();
@@ -1123,14 +1241,12 @@ document.getElementById('modal').addEventListener('click',e=>{if(e.target===docu
 document.getElementById('taskInput').addEventListener('keydown',e=>{
   if(e.key==='Enter'){
     if(activeTab==='work') addWorkFromModal();
-    else if(activeTab==='read') addReadFromModal();
     else if(activeTab==='py') addPyFromModal();
   }
   if(e.key==='Escape') document.getElementById('modal').classList.remove('show');
 });
 document.getElementById('confirmBtn').addEventListener('click',()=>{
   if(activeTab==='work') addWorkFromModal();
-  else if(activeTab==='read') addReadFromModal();
   else if(activeTab==='py') addPyFromModal();
 });
 document.getElementById('statsOverlay').addEventListener('click',e=>{if(e.target===document.getElementById('statsOverlay'))document.getElementById('statsOverlay').classList.remove('show')});
