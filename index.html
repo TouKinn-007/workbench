@@ -667,12 +667,15 @@ async function importData(input){
   reader.onload=async (e)=>{
     try{
       let obj=JSON.parse(e.target.result);
-      localStorage.clear(); setCfg(getCfg());
+      // 导入前保存 Token（备份文件不含 wb_sync_cfg，clear 会把 Token 丢掉）
+      let savedCfg = getCfg();
+      localStorage.clear();
+      setCfg(savedCfg);   // 先恢复 Token，否则后续 repoPush 401
       for(let k in obj) localStorage.setItem(k, obj[k]);
       await repoPush(syncCollect());
       alert('导入成功，已同步到云端');
       location.reload();
-    }catch(err){ alert('导入失败：文件格式不正确'); }
+    }catch(err){ alert('导入失败：'+(err.message||'文件格式不正确')); }
   };
   reader.readAsText(file);
   input.value='';
