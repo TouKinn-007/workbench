@@ -278,8 +278,11 @@ const TODAY = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-
 const WEEKDAYS = ['日','一','二','三','四','五','六'];
 document.getElementById('dateDisplay').textContent = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 周${WEEKDAYS[now.getDay()]}`;
 
-function ls(k,v){ if(v!==undefined){localStorage.setItem(k,JSON.stringify(v)); if(_syncing) _needResync=true; syncMarkDirty();}else{try{return JSON.parse(localStorage.getItem(k))}catch{return null}} }
-function lsRaw(k,v){ if(v!==undefined){ localStorage.setItem(k,v); syncMarkDirty(); } else return localStorage.getItem(k)||''; }
+// 本机编辑时间戳：记录各键最近一次被本机用户修改的时间（同设备时钟，不受跨设备时钟偏差影响）
+function getLocalEdit(){ try{ return JSON.parse(localStorage.getItem('wb_local_edit')||'{}')||{}; }catch{ return {}; } }
+function markLocalEdit(k){ if(!k || k.indexOf('wb_sync')===0 || k==='wb_last_sync') return; let m=getLocalEdit(); m[k]=Date.now(); try{ localStorage.setItem('wb_local_edit', JSON.stringify(m)); }catch{} }
+function ls(k,v){ if(v!==undefined){localStorage.setItem(k,JSON.stringify(v)); markLocalEdit(k); if(_syncing) _needResync=true; syncMarkDirty();}else{try{return JSON.parse(localStorage.getItem(k))}catch{return null}} }
+function lsRaw(k,v){ if(v!==undefined){ localStorage.setItem(k,v); markLocalEdit(k); syncMarkDirty(); } else return localStorage.getItem(k)||''; }
 
 // ============ 同步层（GitHub Gist 合并同步）============
 // 任意 http(s) 环境（云端部署 / 穿透 / localhost）启用；file:// 纯本地。
@@ -509,6 +512,9 @@ async function syncNow(){
     // 上次成功同步后的基线（用于三方合并，避免依赖设备时钟）
     let base = {};
     try{ base = JSON.parse(localStorage.getItem('wb_sync_baseline')||'{}')||{}; }catch{}
+    // 本机编辑保护：本机改过、且尚未经一次成功同步确认的键，云端绝不允许覆盖（用同设备时钟比较，无跨设备偏差）
+    let lastSyncOk = Number(localStorage.getItem('wb_last_sync_ok')||0);
+    let localEdit = getLocalEdit();
     let normPlan = (x)=>{ try{ return JSON.stringify(normalizePlanHistory(JSON.parse(x||'{}'))); }catch{ return x; } };
     let normHealth = (x)=>{ try{ return JSON.stringify(normalizeHealthHistory(JSON.parse(x||'{}'))); }catch{ return x; } };
     // 三方合并：以「自上次同步后谁改过」判定，完全不依赖设备时钟
@@ -535,12 +541,18 @@ async function syncNow(){
       if(k.indexOf('wb_sync')===0 || k==='wb_last_sync') return;   // 跳过内部键
       merged[k] = threeWay(k, local[k], cloud[k], base[k]);
     });
-    // 写回阶段：重新读取当前本地值。若用户在同步途中改过该键（cur !== 快照 local[k]），
-    // 用最新本地值重新三方合并，绝不用旧快照覆盖刚做的修改（修复「切换 tab 偶发清空」竞态）。
+    // 写回阶段：重新读取当前本地值。
+    // 1) 本机改过且未确认 → 强制保留本机值并推送（终极防覆盖，修复「开着不动 10~30 秒被云端旧值还原」）；
+    // 2) 同步途中改过（cur !== 快照）→ 用最新本地值重做三方合并，绝不用旧快照覆盖；
+    // 3) 否则用合并结果。
     let finalMerged = {};
     for(let k in merged){
       let cur = localStorage.getItem(k);
-      let val = (cur!==local[k]) ? threeWay(k, cur, cloud[k], base[k]) : merged[k];
+      let protectedLocal = localEdit[k] && Number(localEdit[k]) > lastSyncOk;
+      let val;
+      if(protectedLocal){ val = cur; }
+      else if(cur!==local[k]){ val = threeWay(k, cur, cloud[k], base[k]); }
+      else { val = merged[k]; }
       finalMerged[k] = val;
       if(val!==undefined) localStorage.setItem(k, val);
     }
@@ -563,13 +575,15 @@ async function syncNow(){
       try{
         await repoPush(finalMerged);
         localStorage.setItem('wb_sync_baseline', JSON.stringify(finalMerged));   // 推送成功才更新基线
+        localStorage.setItem('wb_last_sync_ok', String(Date.now()));             // 成功轮询确认 → 解除本机编辑保护
         pushOk = true;
       }catch(e){
-        setSyncStatus('同步失败（改动已存本地，稍后自动重试）', false);   // 推送失败不更新基线，避免下次误回滚
+        setSyncStatus('同步失败（改动已存本地，稍后自动重试）', false);   // 推送失败不更新基线/确认时间，避免下次误回滚
         pushOk = false;
       }
     }else{
       localStorage.setItem('wb_sync_baseline', JSON.stringify(finalMerged));     // 无变化也播种基线，便于后续检测本地改动
+      localStorage.setItem('wb_last_sync_ok', String(Date.now()));
     }
     let t=new Date();
     localStorage.setItem('wb_last_sync', t.toISOString());
