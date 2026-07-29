@@ -274,7 +274,7 @@ button.en-badge{cursor:pointer}
 <script>
 // === 工具 ===
 const now = new Date();
-const TODAY = now.toISOString().slice(0,10);
+const TODAY = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
 const WEEKDAYS = ['日','一','二','三','四','五','六'];
 document.getElementById('dateDisplay').textContent = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 周${WEEKDAYS[now.getDay()]}`;
 
@@ -306,10 +306,9 @@ function mergePlanItem(a,b){
     state: Math.max(Number(a.state||0), Number(b.state||0)),
     note: (function(){
       let an = a.note==null?'':String(a.note), bn = b.note==null?'':String(b.note);
-      if(an==='') return bn;
-      if(bn==='') return an;
-      if(bn.length > an.length) return bn;   // 更长的笔记视为更新
-      return an;                              // 同长度或本地更长，留本地
+      // 本地非空优先：避免正在输入的短笔记被云端的旧长笔记覆盖
+      if(an!=='') return an;
+      return bn;
     })()
   };
 }
@@ -351,6 +350,33 @@ function deepObjMerge(a,b){
   }
   return out;
 }
+// 把可能损坏的 plan_history 规范化成 { 'YYYY-MM-DD': [ {state,note} ] }
+function normalizePlanHistory(o){
+  if(!o || typeof o !== 'object') return {};
+  if(Array.isArray(o)){
+    // 旧损坏：整条是数组。状态不可信，只保留笔记。
+    return { [TODAY]: o.map(t=>({state:0, note:(t&&t.note)||''})) };
+  }
+  let out = {};
+  for(let k in o){
+    if(DATE_KEY_RE.test(k) && Array.isArray(o[k])) out[k] = o[k];
+  }
+  return out;
+}
+function normalizeHealthHistory(o){
+  if(!o || typeof o !== 'object') return {};
+  if(Array.isArray(o)) return {};
+  // 旧损坏：整条是当日对象（含 noSnack/weight 但无日期键）
+  if(o[TODAY]===undefined && ('noSnack' in o || 'weight' in o)){
+    return { [TODAY]: {noSnack:false, intermittent:false, weight:(o.weight==null?null:Number(o.weight)||null)} };
+  }
+  let out = {};
+  for(let k in o){
+    if(DATE_KEY_RE.test(k) && o[k] && typeof o[k]==='object' && !Array.isArray(o[k])) out[k] = o[k];
+  }
+  return out;
+}
+
 // 合并两个 localStorage 原始字符串值（a=本地, b=云端）
 function mergeRaw(a,b){
   let pa,pb;
@@ -432,6 +458,15 @@ async function syncNow(){
     keys.forEach(k=>{
       if(k==='wb_sync_cfg') return;
       let a=local[k], b=cloud[k];
+      // 对历史记录键做规范化，避免旧损坏数据（数组/当日对象）污染合并结果
+      if(k==='wb_plan_history'){
+        try{ a=JSON.stringify(normalizePlanHistory(JSON.parse(a||'{}'))); }catch{}
+        try{ b=JSON.stringify(normalizePlanHistory(JSON.parse(b||'{}'))); }catch{}
+      }
+      if(k==='wb_health_history'){
+        try{ a=JSON.stringify(normalizeHealthHistory(JSON.parse(a||'{}'))); }catch{}
+        try{ b=JSON.stringify(normalizeHealthHistory(JSON.parse(b||'{}'))); }catch{}
+      }
       if(a==null) merged[k]=b;
       else if(b==null) merged[k]=a;
       else merged[k]=mergeRaw(a,b);
@@ -558,15 +593,22 @@ function dateBarHtml(){
 // ============ Tab1: 重启计划 ============
 // plan_history: { date: [ {state, note} ] }  索引0-5是普通任务
 // 注意：所有写入都必须保存「完整日期对象」(h)，不能只保存当日切片(arr)，否则会破坏结构
+// 日期键正则：用于过滤/校验历史记录对象
+const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 function getPlanStore(){
   let D = VIEW;
   let raw = ls('wb_plan_history');
   let h;
-  if(Array.isArray(raw)){            // 兼容旧版本损坏数据：整条值被存成了数组
-    h = { [D]: raw }; ls('wb_plan_history', h);
+  if(Array.isArray(raw)){
+    // 旧版本损坏：整条被存成了当日数组。状态不可信（会误入今天），只保留笔记。
+    h = { [D]: raw.map(t=>({state:0, note:(t&&t.note)||''})) };
   } else {
     h = (raw && typeof raw === 'object') ? raw : {};
   }
+  // 过滤掉被错误混入的数组索引键（旧同步 bug 会把 [].0/.1 混进对象）
+  let clean = {}; for(let k in h){ if(DATE_KEY_RE.test(k)) clean[k]=h[k]; }
+  h = clean;
   if(!Array.isArray(h[D])){
     if(D !== TODAY) return {h, arr:null};   // 往期无记录 → 返回 null
     h[D] = PLAN_TASKS.slice(0,6).map(()=>({state:0,note:''}));
@@ -578,7 +620,7 @@ function getPlanStore(){
     if(t.state===undefined) t.state = t.done===true ? 2 : 0;
     delete t.done;
   });
-  if(D === TODAY) ls('wb_plan_history', h);
+  // 读取时不自动保存：避免同步/渲染循环把临时/损坏结构固化
   return {h, arr};
 }
 function getPlanToday(){ return getPlanStore().arr; }
@@ -587,17 +629,20 @@ function getHealthStore(){
   let raw = ls('wb_health_history');
   let h;
   if(raw && typeof raw === 'object' && !Array.isArray(raw) && raw[D]===undefined && ('noSnack' in raw || 'weight' in raw)){
-    // 兼容旧版本损坏数据：整条值被存成了当日对象
-    h = { [D]: raw }; ls('wb_health_history', h);
+    // 旧版本损坏：整条被存成了当日对象。布尔状态不可信，weight 可保留。
+    let r = raw;
+    h = { [D]: {noSnack:false, intermittent:false, weight:(r.weight==null?null:Number(r.weight)||null)} };
   } else {
     h = (raw && typeof raw === 'object') ? raw : {};
   }
+  let clean = {}; for(let k in h){ if(DATE_KEY_RE.test(k)) clean[k]=h[k]; }
+  h = clean;
   if(!h[D] || typeof h[D] !== 'object' || Array.isArray(h[D])){
     if(D !== TODAY) return {h, obj:null};
     h[D] = {noSnack:false, intermittent:false, weight:null};
   }
   let obj = h[D];
-  if(D === TODAY) ls('wb_health_history', h);
+  // 读取时不自动保存
   return {h, obj};
 }
 function getHealthToday(){ return getHealthStore().obj; }
@@ -643,7 +688,7 @@ function renderPlan(){
   // 0-5: 普通任务
   for(let i=0;i<6;i++){
     let t = today[i];
-    if(!t){ t = today[i] = {state:0,note:''}; }
+    if(!t){ t = {state:0,note:''}; }
     let chkClass = t.state===2 ? 'checked' : t.state===1 ? 'incomplete' : '';
     let itemClass = t.state===1 ? 'incomplete-state' : '';
     html += `<div class="task-item ${itemClass}" data-idx="${i}">
