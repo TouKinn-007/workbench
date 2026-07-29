@@ -542,7 +542,7 @@ async function syncNow(){
     let keys = new Set([...Object.keys(local), ...Object.keys(cloud)]);
     let merged = {};
     keys.forEach(k=>{
-      if(k.indexOf('wb_sync')===0 || k==='wb_last_sync') return;   // 跳过内部键
+      if(k.indexOf('wb_sync')===0 || k==='wb_last_sync' || k==='wb_local_edit' || k==='wb_last_sync_ok') return;   // 跳过内部键（wb_local_edit/wb_last_sync_ok 是本机私有状态，绝不同步，否则会跨设备污染保护逻辑）
       merged[k] = threeWay(k, local[k], cloud[k], base[k]);
     });
     // 写回阶段：重新读取当前本地值。
@@ -633,6 +633,10 @@ function openSyncSettings(){
 
 async function syncInit(){
   if(!SYNC) return;
+  // 清除可能被旧版本跨设备同步污染的 wb_local_edit：该键是本机私有「正在编辑」状态，
+  // 旧版曾误把它同步到云端，导致其他设备拉到后被永久「保护」而收不到数据。现它已不再参与同步，
+  // 启动时清掉本地残留即可解除卡死（首个同步会正常采用云端；之后本机真实编辑会重新写入保护）。
+  try{ localStorage.removeItem('wb_local_edit'); }catch{}
   document.getElementById('syncbar').style.display='flex';
   let cfg=getCfg();
   if(!cfg.token){
