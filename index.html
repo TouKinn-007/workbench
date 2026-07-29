@@ -284,17 +284,17 @@ function lsRaw(k,v){ if(v!==undefined){ localStorage.setItem(k,v); syncMarkDirty
 // ============ 同步层（GitHub Gist 合并同步）============
 // 任意 http(s) 环境（云端部署 / 穿透 / localhost）启用；file:// 纯本地。
 const SYNC = location.protocol.startsWith('http');
-const GIST_FILE = 'workbench-data.json';
 const GH_API = 'https://api.github.com';
-
-// 固定共享 Gist（数据层，非秘密，公开也无害）
-const DEFAULT_GIST_ID = 'f1b64df8193001e7f979f2589cced21c';
+// 同步后端：GitHub 仓库文件（细粒度 Token 需对仓库有 Contents 读写权限）
+const SYNC_OWNER = 'TouKinn-007';
+const SYNC_REPO = 'workbench';
+const SYNC_BRANCH = 'sync-data';
+const SYNC_PATH = 'sync/workbench-data.json';
 function getCfg(){
   try{
     let c = JSON.parse(localStorage.getItem('wb_sync_cfg')||'{}');
-    if(!c.gistId) c.gistId = DEFAULT_GIST_ID;
-    return c;
-  }catch{ return {gistId:DEFAULT_GIST_ID}; }
+    return c && typeof c==='object' ? c : {};
+  }catch{ return {}; }
 }
 function setCfg(c){ localStorage.setItem('wb_sync_cfg', JSON.stringify(c)); }
 
@@ -445,29 +445,46 @@ async function ghFetch(path, opts={}){
   opts.headers = Object.assign({'Accept':'application/vnd.github+json','User-Agent':'workbench','Authorization':'Bearer '+(cfg.token||'')}, opts.headers||{});
   return fetch(GH_API+path, opts);
 }
-async function ensureGist(){
-  let cfg=getCfg();
-  if(cfg.gistId) return cfg.gistId;
-  let res = await ghFetch('/gists', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({description:'暴躁汤工作台同步数据', public:false, files:{[GIST_FILE]:{content: JSON.stringify(syncCollect())}}})});
-  let j = await res.json();
-  cfg.gistId = j.id;
-  setCfg(cfg);
-  return cfg.gistId;
+// base64 编解码（兼容中文 UTF-8）
+function b64encodeUtf8(str){
+  let bytes=new TextEncoder().encode(str);
+  let bin='';
+  for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
+  return btoa(bin);
 }
-async function gistPull(){
-  let cfg=getCfg();
-  if(!cfg.gistId) return {};
+function b64decodeUtf8(b64){
+  let bin=atob(b64.replace(/\s/g,''));
+  let bytes=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+  return new TextDecoder('utf-8').decode(bytes);
+}
+let _branchOk=false;
+async function repoBranchEnsure(){
+  if(_branchOk) return;
+  let r=await ghFetch(`/repos/${SYNC_OWNER}/${SYNC_REPO}/git/refs/heads/${SYNC_BRANCH}`);
+  if(r.ok){ _branchOk=true; return; }
+  let mainRes=await ghFetch(`/repos/${SYNC_OWNER}/${SYNC_REPO}/git/refs/heads/main`);
+  let mainSha=(await mainRes.json()).object.sha;
+  await ghFetch(`/repos/${SYNC_OWNER}/${SYNC_REPO}/git/refs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ref:`refs/heads/${SYNC_BRANCH}`,sha:mainSha})});
+  _branchOk=true;
+}
+async function repoPull(){
   try{
-    let res = await ghFetch('/gists/'+cfg.gistId);
-    if(!res.ok) return {};
-    let j = await res.json();
-    let content = j.files && j.files[GIST_FILE] && j.files[GIST_FILE].content;
-    return content ? JSON.parse(content) : {};
+    let r=await ghFetch(`/repos/${SYNC_OWNER}/${SYNC_REPO}/contents/${SYNC_PATH}?ref=${SYNC_BRANCH}`);
+    if(!r.ok) return {};
+    let j=await r.json();
+    let content=j.content? b64decodeUtf8(j.content) : '{}';
+    return JSON.parse(content);
   }catch(e){ return {}; }
 }
-async function gistPush(obj){
-  let id = await ensureGist();
-  await ghFetch('/gists/'+id, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({files:{[GIST_FILE]:{content: JSON.stringify(obj)}}})});
+async function repoPush(obj){
+  await repoBranchEnsure();
+  let sha=null;
+  try{
+    let r=await ghFetch(`/repos/${SYNC_OWNER}/${SYNC_REPO}/contents/${SYNC_PATH}?ref=${SYNC_BRANCH}`);
+    if(r.ok) sha=(await r.json()).sha;
+  }catch(e){}
+  await ghFetch(`/repos/${SYNC_OWNER}/${SYNC_REPO}/contents/${SYNC_PATH}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'sync '+new Date().toISOString(),content:b64encodeUtf8(JSON.stringify(obj)),branch:SYNC_BRANCH,sha:sha||undefined})});
 }
 
 // 自动同步：拉云端 → 合并 → 写本地+刷新 → 推云端
@@ -486,7 +503,18 @@ async function syncNow(){
   _syncing = true;
   setSyncStatus('同步中…');
   try{
-    let cloud = await gistPull();
+    let cloud = await repoPull();
+    // 规范化云端基线（仅用于"无变化则跳过推送"的判断，减少提交噪音）
+    let cloudNorm = {};
+    for(let k in cloud){
+      if(k==='wb_sync_cfg') continue;
+      let v=cloud[k];
+      try{
+        if(k==='wb_plan_history') v=JSON.stringify(normalizePlanHistory(JSON.parse(v||'{}')));
+        else if(k==='wb_health_history') v=JSON.stringify(normalizeHealthHistory(JSON.parse(v||'{}')));
+      }catch(e){}
+      cloudNorm[k]=v;
+    }
     let local = syncCollect();
     let merged = {};
     let keys = new Set([...Object.keys(local), ...Object.keys(cloud)]);
@@ -513,10 +541,15 @@ async function syncNow(){
     let typing = ae && (ae.tagName==='TEXTAREA' || ae.tagName==='INPUT');
     renderSidebar();
     if(!typing) renderActiveTab();
-    await gistPush(merged);
+    // 与云端基线一致则说明本地无新改动，无需再推送（避免刷提交）
+    let changed = JSON.stringify(merged)!==JSON.stringify(cloudNorm);
+    if(changed){
+      await repoPush(merged);
+    }
     let t=new Date();
     localStorage.setItem('wb_last_sync', t.toISOString());
-    setSyncStatus('已同步 '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0'));
+    let hh=String(t.getHours()).padStart(2,'0'), mm=String(t.getMinutes()).padStart(2,'0');
+    setSyncStatus((changed?'已同步 ':'已是最新 ')+hh+':'+mm);
   }catch(e){
     setSyncStatus('同步失败：'+(e.stack||e.message||'网络错误').split('\n')[0], false);
     console.error('sync error', e);
@@ -527,11 +560,10 @@ async function syncNow(){
 
 function openSyncSettings(){
   let cfg=getCfg();
-  let token = prompt('粘贴 GitHub Token（需 gist 权限，建议 fine-grained 仅 gist）：\n\n固定 Gist 已内置，只需填 Token 即可自动同步。', cfg.token||'');
+  let token = prompt('粘贴 GitHub Token（需对 '+SYNC_OWNER+'/'+SYNC_REPO+' 仓库有 Contents 读写权限；细粒度 Token 选该仓库 Read and write 即可）：\n\n数据将同步到仓库的 '+SYNC_BRANCH+' 分支（不影响网页本身）。', cfg.token||'');
   if(token===null) return;
   token=token.trim();
   cfg.token=token;
-  cfg.gistId=DEFAULT_GIST_ID;   // Gist ID 固定，不向用户询问
   setCfg(cfg);
   setSyncStatus('已保存，自动同步中…');
   syncNow();
@@ -571,7 +603,7 @@ async function importData(input){
       let obj=JSON.parse(e.target.result);
       localStorage.clear(); setCfg(getCfg());
       for(let k in obj) localStorage.setItem(k, obj[k]);
-      await gistPush(syncCollect());
+      await repoPush(syncCollect());
       alert('导入成功，已同步到云端');
       location.reload();
     }catch(err){ alert('导入失败：文件格式不正确'); }
