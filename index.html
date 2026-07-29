@@ -1035,9 +1035,8 @@ function renderWeightChart(){
     return;
   }
   let vals = pts.map(p=>p.v);
-  let yMin = Math.min(...vals), yMax = Math.max(...vals);
-  let yPad = (yMax-yMin)===0 ? 1 : (yMax-yMin)*0.15;
-  yMin -= yPad; yMax += yPad;
+  let yMin = Math.min(...vals) - 1;
+  let yMax = Math.max(...vals) + 1;
   let yRange = yMax - yMin;
   let n = labels.length;
   let xAt = (i) => n===1 ? padL + plotW/2 : padL + plotW * i / (n-1);
