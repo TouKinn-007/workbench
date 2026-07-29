@@ -504,7 +504,7 @@ function scheduleSync(){
 async function syncNow(){
   if(_syncing) return;
   let cfg=getCfg();
-  if(!cfg.token){ return; }            // 未配置 Token 时静默，不弹框打断
+  if(!cfg.token){ setSyncStatus('未配置 Token，点此处设置'); return; }
   if(!navigator.onLine){ return; }
   _syncing = true;
   setSyncStatus('同步中…');
@@ -638,16 +638,17 @@ async function syncInit(){
   // 启动时清掉本地残留即可解除卡死（首个同步会正常采用云端；之后本机真实编辑会重新写入保护）。
   try{ localStorage.removeItem('wb_local_edit'); }catch{}
   document.getElementById('syncbar').style.display='flex';
+  // 始终启动周期同步（syncNow 内部有无 Token 守卫会静默 return），
+  // 这样用户填 Token 后下一个 30 秒自动同步，无需刷新页面。
+  setInterval(syncNow, 30000);
   let cfg=getCfg();
   if(!cfg.token){
-    setSyncStatus('未配置 Token，点「设置」');
+    setSyncStatus('未配置 Token，点此处设置');
   }else{
     let last=localStorage.getItem('wb_last_sync');
     if(last){ let t=new Date(last); setSyncStatus('上次同步 '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')); }
     else setSyncStatus('未同步');
-    // 每 30 秒自动同步一次
-    setInterval(syncNow, 30000);
-    syncNow();
+    syncNow();   // 有 Token 时立即同步一次
   }
 }
 
