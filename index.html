@@ -300,7 +300,7 @@ function setCfg(c){ localStorage.setItem('wb_sync_cfg', JSON.stringify(c)); }
 
 // 深合并两个对象/数组（数组按索引逐项合并，对象递归，标量取较新/云端优先）
 // 域感知合并：避免云端空值覆盖本地刚输入的内容
-function isPlanItem(o){ return o && typeof o==='object' && !Array.isArray(o) && 'state' in o && 'note' in o; }
+function isPlanItem(o){ return o && typeof o==='object' && !Array.isArray(o) && 'state' in o && 'note' in o && !('text' in o) && !('children' in o); }
 function mergePlanItem(a,b){
   let ats = Number(a.stateTs||0), bts = Number(b.stateTs||0);
   let state = (ats>=bts) ? Number(a.state||0) : Number(b.state||0);
@@ -1117,7 +1117,7 @@ function renderWork(){
         <div class="task-content">
           <div class="task-checkbox ${pChk}" onclick="toggleWork(${i})"></div>
           <div style="flex:1">
-            <div class="task-text ${t.state===2?'done':''} ${t.state===1?'incomplete':''}" onclick="editWorkText(${i},this)">${t.text}</div>
+            <div class="task-text ${t.state===2?'done':''} ${t.state===1?'incomplete':''}" onclick="editWorkText(${i},this)">${t.text||'（无标题）'}</div>
           </div>
         </div>`;
       // 子任务
@@ -1187,7 +1187,7 @@ function deleteWorkSub(i,j){
 function editWorkText(i,el){
   if(!canEdit()){ toast('往期记录为只读'); return; }
   let tasks=getWorkTasks();
-  let cur=tasks[i].text;
+  let cur=tasks[i].text||'';
   el.innerHTML=`<input type="text" value="${cur}" style="width:100%;border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:14px;font-family:inherit;outline:none" onblur="finishEditWork(${i},this)" onkeydown="if(event.key==='Enter')this.blur()">`;
   el.querySelector('input').focus();
 }
@@ -1723,7 +1723,7 @@ function deletePy(i){
 }
 function editPyText(i,el){
   if(!canEdit()){ toast('往期记录为只读'); return; }
-  let tasks=getPyTasks();let cur=tasks[i].text;
+  let tasks=getPyTasks();let cur=tasks[i].text||'';
   el.innerHTML=`<input type="text" value="${cur}" style="width:100%;border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:14px;font-family:inherit;outline:none" onblur="finishEditPy(${i},this)" onkeydown="if(event.key==='Enter')this.blur()">`;
   el.querySelector('input').focus();
 }
