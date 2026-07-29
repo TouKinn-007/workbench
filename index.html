@@ -504,52 +504,67 @@ async function syncNow(){
   setSyncStatus('同步中…');
   try{
     let cloud = await repoPull();
-    // 规范化云端基线（仅用于"无变化则跳过推送"的判断，减少提交噪音）
-    let cloudNorm = {};
-    for(let k in cloud){
-      if(k==='wb_sync_cfg') continue;
-      let v=cloud[k];
-      try{
-        if(k==='wb_plan_history') v=JSON.stringify(normalizePlanHistory(JSON.parse(v||'{}')));
-        else if(k==='wb_health_history') v=JSON.stringify(normalizeHealthHistory(JSON.parse(v||'{}')));
-      }catch(e){}
-      cloudNorm[k]=v;
-    }
     let local = syncCollect();
+    // 上次成功同步后的基线（用于三方合并，避免依赖设备时钟）
+    let base = {};
+    try{ base = JSON.parse(localStorage.getItem('wb_sync_baseline')||'{}')||{}; }catch{}
     let merged = {};
     let keys = new Set([...Object.keys(local), ...Object.keys(cloud)]);
+    let normPlan = (x)=>{ try{ return JSON.stringify(normalizePlanHistory(JSON.parse(x||'{}'))); }catch{ return x; } };
+    let normHealth = (x)=>{ try{ return JSON.stringify(normalizeHealthHistory(JSON.parse(x||'{}'))); }catch{ return x; } };
     keys.forEach(k=>{
-      if(k==='wb_sync_cfg') return;
-      let a=local[k], b=cloud[k];
-      // 对历史记录键做规范化，避免旧损坏数据（数组/当日对象）污染合并结果
-      if(k==='wb_plan_history'){
-        try{ a=JSON.stringify(normalizePlanHistory(JSON.parse(a||'{}'))); }catch{}
-        try{ b=JSON.stringify(normalizePlanHistory(JSON.parse(b||'{}'))); }catch{}
+      if(k.indexOf('wb_sync')===0 || k==='wb_last_sync') return;   // 跳过内部键
+      let l = local[k], c = cloud[k], b = base[k];
+      if(k==='wb_plan_history' || k==='wb_health_history'){
+        let ln = (k==='wb_plan_history')?normPlan(l):normHealth(l);
+        let cn = (k==='wb_plan_history')?normPlan(c):normHealth(c);
+        let bn = (k==='wb_plan_history')?normPlan(b):normHealth(b);
+        if(ln===cn){ merged[k]=ln; return; }            // 完全一致
+        if(c===undefined){ merged[k]=ln; return; }       // 云端无此键 → 本地优先（防误删）
+        if(ln===bn){ merged[k]=cn; return; }             // 仅云端改过 → 听云端
+        if(cn===bn){ merged[k]=ln; return; }             // 仅本地改过 → 听本地
+        merged[k]=mergeRaw(ln,cn);                       // 两边都改（冲突）→ 本地优先
+        return;
       }
-      if(k==='wb_health_history'){
-        try{ a=JSON.stringify(normalizeHealthHistory(JSON.parse(a||'{}'))); }catch{}
-        try{ b=JSON.stringify(normalizeHealthHistory(JSON.parse(b||'{}'))); }catch{}
-      }
-      if(a==null) merged[k]=b;
-      else if(b==null) merged[k]=a;
-      else merged[k]=mergeRaw(a,b);
+      // 普通键（work / py / notes / weight…）：三方合并，本地编辑优先
+      if(l===c){ merged[k]=l; return; }
+      if(c===undefined){ merged[k]=l; return; }          // 云端无此键 → 保留本地（防误删）
+      if(l===b){ merged[k]=c; return; }                  // 仅云端改过 → 听云端
+      if(c===b){ merged[k]=l; return; }                  // 仅本地改过 → 听本地
+      merged[k]=l;                                       // 冲突 → 本地优先
     });
     setCfg(cfg);
-    for(let k in merged) localStorage.setItem(k, merged[k]);
+    for(let k in merged){ if(merged[k]!==undefined) localStorage.setItem(k, merged[k]); }
     // 正在输入备注时不强制重渲染，避免移动端失焦/清空
     let ae = document.activeElement;
     let typing = ae && (ae.tagName==='TEXTAREA' || ae.tagName==='INPUT');
     renderSidebar();
     if(!typing) renderActiveTab();
-    // 与云端基线一致则说明本地无新改动，无需再推送（避免刷提交）
-    let changed = JSON.stringify(merged)!==JSON.stringify(cloudNorm);
+    // 仅当 merged 与云端（规范化后）不一致才推送，减少无意义提交
+    let changed=false;
+    for(let k of Object.keys(merged)){
+      let cv = cloud[k];
+      if(k==='wb_plan_history') cv=normPlan(cv);
+      else if(k==='wb_health_history') cv=normHealth(cv);
+      if(merged[k]!==cv){ changed=true; break; }
+    }
+    let pushOk = !changed;   // 无改动视为已同步
     if(changed){
-      await repoPush(merged);
+      try{
+        await repoPush(merged);
+        localStorage.setItem('wb_sync_baseline', JSON.stringify(merged));   // 推送成功才更新基线
+        pushOk = true;
+      }catch(e){
+        setSyncStatus('同步失败（改动已存本地，稍后自动重试）', false);   // 推送失败不更新基线，避免下次误回滚
+        pushOk = false;
+      }
+    }else{
+      localStorage.setItem('wb_sync_baseline', JSON.stringify(merged));     // 无变化也播种基线，便于后续检测本地改动
     }
     let t=new Date();
     localStorage.setItem('wb_last_sync', t.toISOString());
     let hh=String(t.getHours()).padStart(2,'0'), mm=String(t.getMinutes()).padStart(2,'0');
-    setSyncStatus((changed?'已同步 ':'已是最新 ')+hh+':'+mm);
+    if(pushOk) setSyncStatus((changed?'已同步 ':'已是最新 ')+hh+':'+mm);
   }catch(e){
     setSyncStatus('同步失败：'+(e.stack||e.message||'网络错误').split('\n')[0], false);
     console.error('sync error', e);
