@@ -505,62 +505,71 @@ async function syncNow(){
   setSyncStatus('同步中…');
   try{
     let cloud = await repoPull();
-    let local = syncCollect();
+    let local = syncCollect();   // 同步开始时的本地快照
     // 上次成功同步后的基线（用于三方合并，避免依赖设备时钟）
     let base = {};
     try{ base = JSON.parse(localStorage.getItem('wb_sync_baseline')||'{}')||{}; }catch{}
-    let merged = {};
-    let keys = new Set([...Object.keys(local), ...Object.keys(cloud)]);
     let normPlan = (x)=>{ try{ return JSON.stringify(normalizePlanHistory(JSON.parse(x||'{}'))); }catch{ return x; } };
     let normHealth = (x)=>{ try{ return JSON.stringify(normalizeHealthHistory(JSON.parse(x||'{}'))); }catch{ return x; } };
+    // 三方合并：以「自上次同步后谁改过」判定，完全不依赖设备时钟
+    function threeWay(k, l, c, b){
+      if(k==='wb_plan_history' || k==='wb_health_history'){
+        let ln=(k==='wb_plan_history')?normPlan(l):normHealth(l);
+        let cn=(k==='wb_plan_history')?normPlan(c):normHealth(c);
+        let bn=(k==='wb_plan_history')?normPlan(b):normHealth(b);
+        if(ln===cn) return ln;                  // 完全一致
+        if(c===undefined) return ln;            // 云端无此键 → 本地优先（防误删）
+        if(ln===bn) return cn;                  // 仅云端改过 → 听云端
+        if(cn===bn) return ln;                  // 仅本地改过 → 听本地
+        return mergeRaw(ln,cn);                 // 两边都改（冲突）→ 本地优先
+      }
+      if(l===c) return l;
+      if(c===undefined) return l;               // 云端无此键 → 保留本地（防误删）
+      if(l===b) return c;                       // 仅云端改过 → 听云端
+      if(c===b) return l;                       // 仅本地改过 → 听本地
+      return l;                                 // 冲突 → 本地优先
+    }
+    let keys = new Set([...Object.keys(local), ...Object.keys(cloud)]);
+    let merged = {};
     keys.forEach(k=>{
       if(k.indexOf('wb_sync')===0 || k==='wb_last_sync') return;   // 跳过内部键
-      let l = local[k], c = cloud[k], b = base[k];
-      if(k==='wb_plan_history' || k==='wb_health_history'){
-        let ln = (k==='wb_plan_history')?normPlan(l):normHealth(l);
-        let cn = (k==='wb_plan_history')?normPlan(c):normHealth(c);
-        let bn = (k==='wb_plan_history')?normPlan(b):normHealth(b);
-        if(ln===cn){ merged[k]=ln; return; }            // 完全一致
-        if(c===undefined){ merged[k]=ln; return; }       // 云端无此键 → 本地优先（防误删）
-        if(ln===bn){ merged[k]=cn; return; }             // 仅云端改过 → 听云端
-        if(cn===bn){ merged[k]=ln; return; }             // 仅本地改过 → 听本地
-        merged[k]=mergeRaw(ln,cn);                       // 两边都改（冲突）→ 本地优先
-        return;
-      }
-      // 普通键（work / py / notes / weight…）：三方合并，本地编辑优先
-      if(l===c){ merged[k]=l; return; }
-      if(c===undefined){ merged[k]=l; return; }          // 云端无此键 → 保留本地（防误删）
-      if(l===b){ merged[k]=c; return; }                  // 仅云端改过 → 听云端
-      if(c===b){ merged[k]=l; return; }                  // 仅本地改过 → 听本地
-      merged[k]=l;                                       // 冲突 → 本地优先
+      merged[k] = threeWay(k, local[k], cloud[k], base[k]);
     });
+    // 写回阶段：重新读取当前本地值。若用户在同步途中改过该键（cur !== 快照 local[k]），
+    // 用最新本地值重新三方合并，绝不用旧快照覆盖刚做的修改（修复「切换 tab 偶发清空」竞态）。
+    let finalMerged = {};
+    for(let k in merged){
+      let cur = localStorage.getItem(k);
+      let val = (cur!==local[k]) ? threeWay(k, cur, cloud[k], base[k]) : merged[k];
+      finalMerged[k] = val;
+      if(val!==undefined) localStorage.setItem(k, val);
+    }
     setCfg(cfg);
-    for(let k in merged){ if(merged[k]!==undefined) localStorage.setItem(k, merged[k]); }
     // 正在输入备注时不强制重渲染，避免移动端失焦/清空
     let ae = document.activeElement;
     let typing = ae && (ae.tagName==='TEXTAREA' || ae.tagName==='INPUT');
     renderSidebar();
     if(!typing) renderActiveTab();
-    // 仅当 merged 与云端（规范化后）不一致才推送，减少无意义提交
+    // 仅当 finalMerged 与云端（规范化后）不一致才推送，减少无意义提交
     let changed=false;
-    for(let k of Object.keys(merged)){
+    for(let k of Object.keys(finalMerged)){
       let cv = cloud[k];
       if(k==='wb_plan_history') cv=normPlan(cv);
       else if(k==='wb_health_history') cv=normHealth(cv);
-      if(merged[k]!==cv){ changed=true; break; }
+      if(finalMerged[k]!==cv){ changed=true; break; }
     }
     let pushOk = !changed;   // 无改动视为已同步
     if(changed){
       try{
-        await repoPush(merged);
-        localStorage.setItem('wb_sync_baseline', JSON.stringify(merged));   // 推送成功才更新基线
+        await repoPush(finalMerged);
+        localStorage.setItem('wb_sync_baseline', JSON.stringify(finalMerged));   // 推送成功才更新基线
         pushOk = true;
       }catch(e){
         setSyncStatus('同步失败（改动已存本地，稍后自动重试）', false);   // 推送失败不更新基线，避免下次误回滚
         pushOk = false;
       }
     }else{
-      localStorage.setItem('wb_sync_baseline', JSON.stringify(merged));     // 无变化也播种基线，便于后续检测本地改动
+      localStorage.setItem('wb_sync_baseline', JSON.stringify(finalMerged));     // 无变化也播种基线，便于后续检测本地改动
     }
     let t=new Date();
     localStorage.setItem('wb_last_sync', t.toISOString());
