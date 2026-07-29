@@ -302,25 +302,31 @@ function setCfg(c){ localStorage.setItem('wb_sync_cfg', JSON.stringify(c)); }
 // 域感知合并：避免云端空值覆盖本地刚输入的内容
 function isPlanItem(o){ return o && typeof o==='object' && !Array.isArray(o) && 'state' in o && 'note' in o; }
 function mergePlanItem(a,b){
-  return {
-    state: Math.max(Number(a.state||0), Number(b.state||0)),
-    note: (function(){
-      let an = a.note==null?'':String(a.note), bn = b.note==null?'':String(b.note);
-      // 本地非空优先：避免正在输入的短笔记被云端的旧长笔记覆盖
-      if(an!=='') return an;
-      return bn;
-    })()
-  };
+  let ats = Number(a.stateTs||0), bts = Number(b.stateTs||0);
+  let state = (ats>=bts) ? Number(a.state||0) : Number(b.state||0);
+  let an = a.note==null?'':String(a.note), bn = b.note==null?'':String(b.note);
+  let ants = Number(a.noteTs||0), bnts = Number(b.noteTs||0);
+  let note = (ants>bnts) ? an : (bnts>ants) ? bn : (an!==''?an:bn);
+  return { state, note, stateTs: Math.max(ats,bts), noteTs: Math.max(ants,bnts) };
 }
 function isHealthItem(o){ return o && typeof o==='object' && !Array.isArray(o) && ('noSnack' in o || 'weight' in o); }
 function mergeHealthItem(a,b){
-  let aw=a.weight, bw=b.weight;
+  let atsN=Number(a.noSnackTs||0), btsN=Number(b.noSnackTs||0);
+  let atsI=Number(a.intermittentTs||0), btsI=Number(b.intermittentTs||0);
+  let atsW=Number(a.weightTs||0), btsW=Number(b.weightTs||0);
+  let aw=(a.weight==null||isNaN(Number(a.weight)))?null:Number(a.weight);
+  let bw=(b.weight==null||isNaN(Number(b.weight)))?null:Number(b.weight);
+  let weight;
+  if(atsW>btsW) weight=aw;
+  else if(btsW>atsW) weight=bw;
+  else weight = (aw!=null)?aw:bw;   // 平手：优先保留已填数值，避免清空
   return {
-    noSnack: !!(a.noSnack || b.noSnack),
-    intermittent: !!(a.intermittent || b.intermittent),
-    weight: (aw==null||aw===undefined) ? (bw==null?null:bw)
-          : (bw==null||bw===undefined) ? aw
-          : aw                               // 冲突留本地（保留正在输入的数值）
+    noSnack: (atsN>=btsN)? !!a.noSnack : !!b.noSnack,
+    intermittent: (atsI>=btsI)? !!a.intermittent : !!b.intermittent,
+    weight,
+    noSnackTs: Math.max(atsN,btsN),
+    intermittentTs: Math.max(atsI,btsI),
+    weightTs: Math.max(atsW,btsW)
   };
 }
 function deepObjMerge(a,b){
@@ -355,7 +361,7 @@ function normalizePlanHistory(o){
   if(!o || typeof o !== 'object') return {};
   if(Array.isArray(o)){
     // 旧损坏：整条是数组。状态不可信，只保留笔记。
-    return { [TODAY]: o.map(t=>({state:0, note:(t&&t.note)||''})) };
+    return { [TODAY]: o.map(t=>({state:0, note:(t&&t.note)||'' , stateTs:0, noteTs:0})) };
   }
   let out = {};
   for(let k in o){
@@ -368,9 +374,9 @@ function normalizePlanHistory(o){
     // 过滤数组项：必须是 {state,note} 对象，不能含日期键
     out[k] = arr.map(t=>{
       if(!t || typeof t !== 'object' || Array.isArray(t) || Object.keys(t).some(kk=>DATE_KEY_RE.test(kk))){
-        return {state:0, note:''};
+        return {state:0, note:'', stateTs:0, noteTs:0};
       }
-      return {state: Number(t.state)||0, note: t.note==null?'':String(t.note)};
+      return {state: Number(t.state)||0, note: t.note==null?'':String(t.note), stateTs: Number(t.stateTs)||0, noteTs: Number(t.noteTs)||0};
     });
   }
   return out;
@@ -381,7 +387,7 @@ function normalizeHealthHistory(o){
   // 旧损坏：整条是当日对象（含 noSnack/weight 但无日期键）
   if(o[TODAY]===undefined && ('noSnack' in o || 'weight' in o)){
     let w = (o.weight==null||isNaN(Number(o.weight)))?null:Number(o.weight);
-    return { [TODAY]: {noSnack:false, intermittent:false, weight:w} };
+    return { [TODAY]: {noSnack:false, intermittent:false, weight:w, noSnackTs:0, intermittentTs:0, weightTs:0} };
   }
   let out = {};
   for(let k in o){
@@ -391,13 +397,16 @@ function normalizeHealthHistory(o){
     if(!v || typeof v !== 'object' || Array.isArray(v) || Object.keys(v).some(kk=>DATE_KEY_RE.test(kk))){
       let w = null;
       if(v && typeof v==='object' && !Array.isArray(v) && v.weight!=null && !isNaN(Number(v.weight))) w = Number(v.weight);
-      out[k] = {noSnack:false, intermittent:false, weight:w};
+      out[k] = {noSnack:false, intermittent:false, weight:w, noSnackTs:0, intermittentTs:0, weightTs:0};
       continue;
     }
     out[k] = {
       noSnack: !!v.noSnack,
       intermittent: !!v.intermittent,
-      weight: (v.weight==null||isNaN(Number(v.weight)))?null:Number(v.weight)
+      weight: (v.weight==null||isNaN(Number(v.weight)))?null:Number(v.weight),
+      noSnackTs: Number(v.noSnackTs)||0,
+      intermittentTs: Number(v.intermittentTs)||0,
+      weightTs: Number(v.weightTs)||0
     };
   }
   return out;
@@ -627,7 +636,7 @@ function getPlanStore(){
   let h = normalizePlanHistory(ls('wb_plan_history'));
   if(!Array.isArray(h[D])){
     if(D !== TODAY) return {h, arr:null};   // 往期无记录 → 返回 null
-    h[D] = PLAN_TASKS.slice(0,6).map(()=>({state:0,note:''}));
+    h[D] = PLAN_TASKS.slice(0,6).map(()=>({state:0,note:'',stateTs:0,noteTs:0}));
     ls('wb_plan_history', h);               // 今天首次：写入默认值
   }
   let arr = h[D];
@@ -639,7 +648,7 @@ function getHealthStore(){
   let h = normalizeHealthHistory(ls('wb_health_history'));
   if(!h[D] || typeof h[D] !== 'object' || Array.isArray(h[D])){
     if(D !== TODAY) return {h, obj:null};
-    h[D] = {noSnack:false, intermittent:false, weight:null};
+    h[D] = {noSnack:false, intermittent:false, weight:null, noSnackTs:0, intermittentTs:0, weightTs:0};
     ls('wb_health_history', h);             // 今天首次：写入默认值
   }
   let obj = h[D];
@@ -789,6 +798,7 @@ function togglePlan(i){
   let t = arr[i];
   t.state = (t.state===undefined?0:t.state)+1;
   if(t.state>2) t.state=0;
+  t.stateTs = Date.now();
   ls('wb_plan_history', h);
   renderPlan();
 }
@@ -797,6 +807,7 @@ function savePlanNote(i,val){
   let {h, arr} = getPlanStore();
   if(!arr) return;
   arr[i].note = val;
+  arr[i].noteTs = Date.now();
   ls('wb_plan_history', h);
 }
 
@@ -805,6 +816,7 @@ function toggleHealth(field){
   let {h, obj} = getHealthStore();
   if(!obj) return;
   obj[field] = !obj[field];
+  obj[field+'Ts'] = Date.now();
   ls('wb_health_history', h);
   renderPlan();
 }
@@ -815,21 +827,24 @@ function checkHealthAll(){
   let allDone = obj.noSnack && obj.intermittent && obj.weight;
   obj.noSnack = !allDone;
   obj.intermittent = !allDone;
+  obj.noSnackTs = Date.now();
+  obj.intermittentTs = Date.now();
   ls('wb_health_history', h);
   renderPlan();
 }
 function resetTodayPlan(){
   if(!canEdit()){ toast('往期记录为只读'); return; }
-  if(!confirm('确定重置今日重启计划的所有勾选状态？\n（备注、体重记录会保留）')) return;
+  if(!confirm('确定重置今日重启计划的所有勾选状态？\n（备注、体重记录会保留，并会同步到其他设备）')) return;
+  let now = Date.now();
   let ps = getPlanStore();
   if(ps.arr){
-    ps.arr.forEach(t=>{ t.state = 0; });
+    ps.arr.forEach(t=>{ t.state = 0; t.stateTs = now; });
     ls('wb_plan_history', ps.h);
   }
   let hs = getHealthStore();
   if(hs.obj){
-    hs.obj.noSnack = false;
-    hs.obj.intermittent = false;
+    hs.obj.noSnack = false; hs.obj.noSnackTs = now;
+    hs.obj.intermittent = false; hs.obj.intermittentTs = now;
     // 体重保留，不重置
     ls('wb_health_history', hs.h);
   }
@@ -842,6 +857,7 @@ function saveWeight(val){
   if(!obj) return;
   let w = parseFloat(val);
   obj.weight = isNaN(w)?null:w;
+  obj.weightTs = Date.now();
   ls('wb_health_history', h);
   let wh = getWeightHistory();
   wh[VIEW] = isNaN(w)?null:w;
