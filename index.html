@@ -368,7 +368,7 @@ function normalizePlanHistory(o){
     if(!DATE_KEY_RE.test(k)) continue;
     let arr = o[k];
     if(!Array.isArray(arr)){
-      out[k] = PLAN_TASKS.slice(0,6).map(()=>({state:0,note:''}));
+      out[k] = PLAN_TASKS.slice(0,6).map(()=>({state:0,note:'',stateTs:0,noteTs:0}));
       continue;
     }
     // 过滤数组项：必须是 {state,note} 对象，不能含日期键
