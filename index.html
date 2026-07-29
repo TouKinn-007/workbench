@@ -359,7 +359,19 @@ function normalizePlanHistory(o){
   }
   let out = {};
   for(let k in o){
-    if(DATE_KEY_RE.test(k) && Array.isArray(o[k])) out[k] = o[k];
+    if(!DATE_KEY_RE.test(k)) continue;
+    let arr = o[k];
+    if(!Array.isArray(arr)){
+      out[k] = PLAN_TASKS.slice(0,6).map(()=>({state:0,note:''}));
+      continue;
+    }
+    // 过滤数组项：必须是 {state,note} 对象，不能含日期键
+    out[k] = arr.map(t=>{
+      if(!t || typeof t !== 'object' || Array.isArray(t) || Object.keys(t).some(kk=>DATE_KEY_RE.test(kk))){
+        return {state:0, note:''};
+      }
+      return {state: Number(t.state)||0, note: t.note==null?'':String(t.note)};
+    });
   }
   return out;
 }
@@ -368,11 +380,25 @@ function normalizeHealthHistory(o){
   if(Array.isArray(o)) return {};
   // 旧损坏：整条是当日对象（含 noSnack/weight 但无日期键）
   if(o[TODAY]===undefined && ('noSnack' in o || 'weight' in o)){
-    return { [TODAY]: {noSnack:false, intermittent:false, weight:(o.weight==null?null:Number(o.weight)||null)} };
+    let w = (o.weight==null||isNaN(Number(o.weight)))?null:Number(o.weight);
+    return { [TODAY]: {noSnack:false, intermittent:false, weight:w} };
   }
   let out = {};
   for(let k in o){
-    if(DATE_KEY_RE.test(k) && o[k] && typeof o[k]==='object' && !Array.isArray(o[k])) out[k] = o[k];
+    if(!DATE_KEY_RE.test(k)) continue;
+    let v = o[k];
+    // corrupted：值里又嵌了日期键，或根本不是对象
+    if(!v || typeof v !== 'object' || Array.isArray(v) || Object.keys(v).some(kk=>DATE_KEY_RE.test(kk))){
+      let w = null;
+      if(v && typeof v==='object' && !Array.isArray(v) && v.weight!=null && !isNaN(Number(v.weight))) w = Number(v.weight);
+      out[k] = {noSnack:false, intermittent:false, weight:w};
+      continue;
+    }
+    out[k] = {
+      noSnack: !!v.noSnack,
+      intermittent: !!v.intermittent,
+      weight: (v.weight==null||isNaN(Number(v.weight)))?null:Number(v.weight)
+    };
   }
   return out;
 }
@@ -598,51 +624,25 @@ const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function getPlanStore(){
   let D = VIEW;
-  let raw = ls('wb_plan_history');
-  let h;
-  if(Array.isArray(raw)){
-    // 旧版本损坏：整条被存成了当日数组。状态不可信（会误入今天），只保留笔记。
-    h = { [D]: raw.map(t=>({state:0, note:(t&&t.note)||''})) };
-  } else {
-    h = (raw && typeof raw === 'object') ? raw : {};
-  }
-  // 过滤掉被错误混入的数组索引键（旧同步 bug 会把 [].0/.1 混进对象）
-  let clean = {}; for(let k in h){ if(DATE_KEY_RE.test(k)) clean[k]=h[k]; }
-  h = clean;
+  let h = normalizePlanHistory(ls('wb_plan_history'));
   if(!Array.isArray(h[D])){
     if(D !== TODAY) return {h, arr:null};   // 往期无记录 → 返回 null
     h[D] = PLAN_TASKS.slice(0,6).map(()=>({state:0,note:''}));
+    ls('wb_plan_history', h);               // 今天首次：写入默认值
   }
   let arr = h[D];
-  // 兼容旧数据 done -> state
-  arr.forEach(t=>{
-    if(!t || typeof t !== 'object') return;
-    if(t.state===undefined) t.state = t.done===true ? 2 : 0;
-    delete t.done;
-  });
-  // 读取时不自动保存：避免同步/渲染循环把临时/损坏结构固化
   return {h, arr};
 }
 function getPlanToday(){ return getPlanStore().arr; }
 function getHealthStore(){
   let D = VIEW;
-  let raw = ls('wb_health_history');
-  let h;
-  if(raw && typeof raw === 'object' && !Array.isArray(raw) && raw[D]===undefined && ('noSnack' in raw || 'weight' in raw)){
-    // 旧版本损坏：整条被存成了当日对象。布尔状态不可信，weight 可保留。
-    let r = raw;
-    h = { [D]: {noSnack:false, intermittent:false, weight:(r.weight==null?null:Number(r.weight)||null)} };
-  } else {
-    h = (raw && typeof raw === 'object') ? raw : {};
-  }
-  let clean = {}; for(let k in h){ if(DATE_KEY_RE.test(k)) clean[k]=h[k]; }
-  h = clean;
+  let h = normalizeHealthHistory(ls('wb_health_history'));
   if(!h[D] || typeof h[D] !== 'object' || Array.isArray(h[D])){
     if(D !== TODAY) return {h, obj:null};
     h[D] = {noSnack:false, intermittent:false, weight:null};
+    ls('wb_health_history', h);             // 今天首次：写入默认值
   }
   let obj = h[D];
-  // 读取时不自动保存
   return {h, obj};
 }
 function getHealthToday(){ return getHealthStore().obj; }
@@ -710,7 +710,7 @@ function renderPlan(){
   for(let d=allDates.length-1;d>=0;d--){
     if(allDates[d]<VIEW && wh[allDates[d]]!==null && wh[allDates[d]]!==undefined){prevWeight=wh[allDates[d]];break;}
   }
-  let curWeight = health.weight;
+  let curWeight = health.weight != null ? health.weight : wh[VIEW];
   let arrow = '';
   if(curWeight){
     if(prevWeight){
