@@ -278,7 +278,7 @@ const TODAY = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-
 const WEEKDAYS = ['日','一','二','三','四','五','六'];
 document.getElementById('dateDisplay').textContent = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 周${WEEKDAYS[now.getDay()]}`;
 
-function ls(k,v){ if(v!==undefined){localStorage.setItem(k,JSON.stringify(v)); syncMarkDirty();}else{try{return JSON.parse(localStorage.getItem(k))}catch{return null}} }
+function ls(k,v){ if(v!==undefined){localStorage.setItem(k,JSON.stringify(v)); if(_syncing) _needResync=true; syncMarkDirty();}else{try{return JSON.parse(localStorage.getItem(k))}catch{return null}} }
 function lsRaw(k,v){ if(v!==undefined){ localStorage.setItem(k,v); syncMarkDirty(); } else return localStorage.getItem(k)||''; }
 
 // ============ 同步层（GitHub Gist 合并同步）============
@@ -489,6 +489,7 @@ async function repoPush(obj){
 
 // 自动同步：拉云端 → 合并 → 写本地+刷新 → 推云端
 let _syncing = false;
+let _needResync = false;   // 同步进行中若又有本地写入，结束后补推一次（防止关闭时漏存）
 let _syncDebounce = null;
 // 数据改动后 5 秒自动触发一次同步（与 30 秒定时互补，减少手动等待）
 function scheduleSync(){
@@ -570,6 +571,7 @@ async function syncNow(){
     console.error('sync error', e);
   }finally{
     _syncing = false;
+    if(_needResync){ _needResync = false; syncNow(); }   // 同步途中发生的本地改动，结束后补推，避免关闭时漏存
   }
 }
 
@@ -2017,6 +2019,12 @@ syncInit().then(()=>{
   renderSidebar();
   renderActiveTab();
 });
+// 切后台 / 回到前台 / 关闭页面时立即同步：
+// 后台与关闭前把本地改动推到云端（避免“关闭再打开偶尔变空”），回到前台时拉取其他设备更新
+if(SYNC){
+  document.addEventListener('visibilitychange', ()=>{ syncNow(); });
+  window.addEventListener('pagehide', ()=>{ syncNow(); });
+}
 </script>
 <script>
 if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(function(){}); }
