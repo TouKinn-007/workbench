@@ -471,9 +471,11 @@ async function repoBranchEnsure(){
   await ghFetch(`/repos/${SYNC_OWNER}/${SYNC_REPO}/git/refs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ref:`refs/heads/${SYNC_BRANCH}`,sha:mainSha})});
   _branchOk=true;
 }
-async function repoPull(){
+async function repoPull(bust){
   try{
-    let r=await ghFetch(`/repos/${SYNC_OWNER}/${SYNC_REPO}/contents/${SYNC_PATH}?ref=${SYNC_BRANCH}`);
+    let url=`/repos/${SYNC_OWNER}/${SYNC_REPO}/contents/${SYNC_PATH}?ref=${SYNC_BRANCH}`;
+    if(bust) url += '&_='+Date.now();          // 破坏 CDN 缓存，确保读到云端最新值（陈旧读取曾把云端旧值当最新）
+    let r=await ghFetch(url, bust?{headers:{'Cache-Control':'no-cache'}}:{});
     if(!r.ok) return {};
     let j=await r.json();
     let content=j.content? b64decodeUtf8(j.content) : '{}';
@@ -484,7 +486,7 @@ async function repoPush(obj){
   await repoBranchEnsure();
   let sha=null;
   try{
-    let r=await ghFetch(`/repos/${SYNC_OWNER}/${SYNC_REPO}/contents/${SYNC_PATH}?ref=${SYNC_BRANCH}`);
+    let r=await ghFetch(`/repos/${SYNC_OWNER}/${SYNC_REPO}/contents/${SYNC_PATH}?ref=${SYNC_BRANCH}&_=${Date.now()}`,{headers:{'Cache-Control':'no-cache'}});
     if(r.ok) sha=(await r.json()).sha;
   }catch(e){}
   await ghFetch(`/repos/${SYNC_OWNER}/${SYNC_REPO}/contents/${SYNC_PATH}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'sync '+new Date().toISOString(),content:b64encodeUtf8(JSON.stringify(obj)),branch:SYNC_BRANCH,sha:sha||undefined})});
@@ -507,13 +509,15 @@ async function syncNow(){
   _syncing = true;
   setSyncStatus('同步中…');
   try{
-    let cloud = await repoPull();
+    let cloud = await repoPull(true);  // 缓存破坏，读云端最新值
     let local = syncCollect();   // 同步开始时的本地快照
     // 上次成功同步后的基线（用于三方合并，避免依赖设备时钟）
     let base = {};
     try{ base = JSON.parse(localStorage.getItem('wb_sync_baseline')||'{}')||{}; }catch{}
-    // 本机编辑保护：本机改过、且尚未经一次成功同步确认的键，云端绝不允许覆盖（用同设备时钟比较，无跨设备偏差）
-    let lastSyncOk = Number(localStorage.getItem('wb_last_sync_ok')||0);
+    // 本机编辑保护（关键修复）：只要某键存在「尚未确认已安全上云的本机编辑」就强制保留本机值。
+    // 旧逻辑用全局时间戳 wb_last_sync_ok 比较，首次同步成功后该时间戳越过编辑时间，
+    // 保护被提前解除 → 随后一次陈旧的云端读取把本机值还原成旧值（开着不动 10~30 秒被清空）。
+    // 新逻辑：保护持续到「重新读取云端确认该键已是本机值」才解除，期间绝不因陈旧云端而回滚。
     let localEdit = getLocalEdit();
     let normPlan = (x)=>{ try{ return JSON.stringify(normalizePlanHistory(JSON.parse(x||'{}'))); }catch{ return x; } };
     let normHealth = (x)=>{ try{ return JSON.stringify(normalizeHealthHistory(JSON.parse(x||'{}'))); }catch{ return x; } };
@@ -542,16 +546,13 @@ async function syncNow(){
       merged[k] = threeWay(k, local[k], cloud[k], base[k]);
     });
     // 写回阶段：重新读取当前本地值。
-    // 1) 本机改过且未确认 → 强制保留本机值并推送（终极防覆盖，修复「开着不动 10~30 秒被云端旧值还原」）；
-    // 2) 同步途中改过（cur !== 快照）→ 用最新本地值重做三方合并，绝不用旧快照覆盖；
-    // 3) 否则用合并结果。
     let finalMerged = {};
     for(let k in merged){
       let cur = localStorage.getItem(k);
-      let protectedLocal = localEdit[k] && Number(localEdit[k]) > lastSyncOk;
+      let protectedLocal = !!localEdit[k];        // 存在未确认本机编辑 → 强制保留本机值并推云端
       let val;
       if(protectedLocal){ val = cur; }
-      else if(cur!==local[k]){ val = threeWay(k, cur, cloud[k], base[k]); }
+      else if(cur!==local[k]){ val = threeWay(k, cur, cloud[k], base[k]); }  // 同步途中改过 → 用最新本地值重做合并
       else { val = merged[k]; }
       finalMerged[k] = val;
       if(val!==undefined) localStorage.setItem(k, val);
@@ -570,21 +571,42 @@ async function syncNow(){
       else if(k==='wb_health_history') cv=normHealth(cv);
       if(finalMerged[k]!==cv){ changed=true; break; }
     }
+    let toClear = [];   // 已确认安全上云、可解除本机编辑保护的键
     let pushOk = !changed;   // 无改动视为已同步
     if(changed){
       try{
         await repoPush(finalMerged);
         localStorage.setItem('wb_sync_baseline', JSON.stringify(finalMerged));   // 推送成功才更新基线
-        localStorage.setItem('wb_last_sync_ok', String(Date.now()));             // 成功轮询确认 → 解除本机编辑保护
+        // 重新读取云端，确认我们写的值真的上去了（破除 CDN 陈旧），再解除本机编辑保护
+        let verify = await repoPull(true);
+        for(let k in finalMerged){
+          let cv = verify[k];
+          if(k==='wb_plan_history') cv=normPlan(cv);
+          else if(k==='wb_health_history') cv=normHealth(cv);
+          if(finalMerged[k]===cv) toClear.push(k);
+        }
         pushOk = true;
       }catch(e){
-        setSyncStatus('同步失败（改动已存本地，稍后自动重试）', false);   // 推送失败不更新基线/确认时间，避免下次误回滚
+        setSyncStatus('同步失败（改动已存本地，稍后自动重试）', false);   // 推送失败不解除保护，下次重试
         pushOk = false;
       }
     }else{
       localStorage.setItem('wb_sync_baseline', JSON.stringify(finalMerged));     // 无变化也播种基线，便于后续检测本地改动
-      localStorage.setItem('wb_last_sync_ok', String(Date.now()));
+      // 无改动：若本机值与（已缓存破坏的）云端一致，说明该键已同步，解除可能的旧保护
+      for(let k in finalMerged){
+        let cv = cloud[k];
+        if(k==='wb_plan_history') cv=normPlan(cv);
+        else if(k==='wb_health_history') cv=normHealth(cv);
+        if(finalMerged[k]===cv) toClear.push(k);
+      }
     }
+    // 解除已确认安全的键的保护（仅这些键会重新接受云端改动）
+    if(toClear.length){
+      let m=getLocalEdit();
+      toClear.forEach(k=>{ delete m[k]; });
+      localStorage.setItem('wb_local_edit', JSON.stringify(m));
+    }
+    localStorage.setItem('wb_last_sync_ok', String(Date.now()));
     let t=new Date();
     localStorage.setItem('wb_last_sync', t.toISOString());
     let hh=String(t.getHours()).padStart(2,'0'), mm=String(t.getMinutes()).padStart(2,'0');
