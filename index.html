@@ -522,19 +522,23 @@ async function syncNow(){
     let normPlan = (x)=>{ try{ return JSON.stringify(normalizePlanHistory(JSON.parse(x||'{}'))); }catch{ return x; } };
     let normHealth = (x)=>{ try{ return JSON.stringify(normalizeHealthHistory(JSON.parse(x||'{}'))); }catch{ return x; } };
     // 三方合并：以「自上次同步后谁改过」判定，完全不依赖设备时钟
+    // ⚠️ null（localStorage.getItem 对不存在键）和 undefined（base 对不存在键）
+    //    语义相同（都没有值），必须等同对待，否则会误判"冲突"→ 返回 null → 丢弃云端数据！
     function threeWay(k, l, c, b){
+      l = (l===null) ? undefined : l;   // null → undefined：不存在键统一表示
+      b = (b===null) ? undefined : b;
       if(k==='wb_plan_history' || k==='wb_health_history'){
         let ln=(k==='wb_plan_history')?normPlan(l):normHealth(l);
         let cn=(k==='wb_plan_history')?normPlan(c):normHealth(c);
         let bn=(k==='wb_plan_history')?normPlan(b):normHealth(b);
         if(ln===cn) return ln;                  // 完全一致
-        if(c===undefined) return ln;            // 云端无此键 → 本地优先（防误删）
+        if(c===undefined || c===null) return ln;            // 云端无此键 → 本地优先（防误删）
         if(ln===bn) return cn;                  // 仅云端改过 → 听云端
         if(cn===bn) return ln;                  // 仅本地改过 → 听本地
         return mergeRaw(ln,cn);                 // 两边都改（冲突）→ 本地优先
       }
       if(l===c) return l;
-      if(c===undefined) return l;               // 云端无此键 → 保留本地（防误删）
+      if(c===undefined || c===null) return l;               // 云端无此键 → 保留本地（防误删）
       if(l===b) return c;                       // 仅云端改过 → 听云端
       if(c===b) return l;                       // 仅本地改过 → 听本地
       return l;                                 // 冲突 → 本地优先
