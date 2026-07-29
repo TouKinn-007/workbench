@@ -299,6 +299,31 @@ function getCfg(){
 function setCfg(c){ localStorage.setItem('wb_sync_cfg', JSON.stringify(c)); }
 
 // 深合并两个对象/数组（数组按索引逐项合并，对象递归，标量取较新/云端优先）
+// 域感知合并：避免云端空值覆盖本地刚输入的内容
+function isPlanItem(o){ return o && typeof o==='object' && !Array.isArray(o) && 'state' in o && 'note' in o; }
+function mergePlanItem(a,b){
+  return {
+    state: Math.max(Number(a.state||0), Number(b.state||0)),
+    note: (function(){
+      let an = a.note==null?'':String(a.note), bn = b.note==null?'':String(b.note);
+      if(an==='') return bn;
+      if(bn==='') return an;
+      if(bn.length > an.length) return bn;   // 更长的笔记视为更新
+      return an;                              // 同长度或本地更长，留本地
+    })()
+  };
+}
+function isHealthItem(o){ return o && typeof o==='object' && !Array.isArray(o) && ('noSnack' in o || 'weight' in o); }
+function mergeHealthItem(a,b){
+  let aw=a.weight, bw=b.weight;
+  return {
+    noSnack: !!(a.noSnack || b.noSnack),
+    intermittent: !!(a.intermittent || b.intermittent),
+    weight: (aw==null||aw===undefined) ? (bw==null?null:bw)
+          : (bw==null||bw===undefined) ? aw
+          : aw                               // 冲突留本地（保留正在输入的数值）
+  };
+}
 function deepObjMerge(a,b){
   if(Array.isArray(a) && Array.isArray(b)){
     let len = Math.max(a.length, b.length);
@@ -307,9 +332,13 @@ function deepObjMerge(a,b){
       let av=a[i], bv=b[i];
       if(av===undefined) out[i]=bv;
       else if(bv===undefined) out[i]=av;
-      else if(av&&typeof av==='object'&&bv&&typeof bv==='object'&&!Array.isArray(av)&&!Array.isArray(bv)) out[i]=deepObjMerge(av,bv);
+      else if(av&&typeof av==='object'&&bv&&typeof bv==='object'&&!Array.isArray(av)&&!Array.isArray(bv)){
+        if(isPlanItem(av)&&isPlanItem(bv)) out[i]=mergePlanItem(av,bv);
+        else if(isHealthItem(av)&&isHealthItem(bv)) out[i]=mergeHealthItem(av,bv);
+        else out[i]=deepObjMerge(av,bv);
+      }
       else if(Array.isArray(av)&&Array.isArray(bv)) out[i]=deepObjMerge(av,bv);
-      else out[i]=bv; // 标量冲突时以云端/较新为准
+      else out[i]=bv;
     }
     return out;
   }
@@ -407,10 +436,13 @@ async function syncNow(){
       else if(b==null) merged[k]=a;
       else merged[k]=mergeRaw(a,b);
     });
-    localStorage.clear();
     setCfg(cfg);
     for(let k in merged) localStorage.setItem(k, merged[k]);
-    renderSidebar(); renderActiveTab();
+    // 正在输入备注时不强制重渲染，避免移动端失焦/清空
+    let ae = document.activeElement;
+    let typing = ae && (ae.tagName==='TEXTAREA' || ae.tagName==='INPUT');
+    renderSidebar();
+    if(!typing) renderActiveTab();
     await gistPush(merged);
     let t=new Date();
     localStorage.setItem('wb_last_sync', t.toISOString());
